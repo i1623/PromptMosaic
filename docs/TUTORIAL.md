@@ -41,10 +41,11 @@ PromptMosaic は、**プロンプトを「タイル」として組み立て、In
 | 必要なもの | 補足 |
 | --- | --- |
 | **InvokeAI 6.13 以降** | 別途インストールし、起動できる状態にしておきます |
-| **Python 3.10〜3.12** | Windows の公式インストーラ版（Conda/Anaconda 不可） |
+| **Python 3.11（推奨）** | Windows の公式インストーラ版（Conda/Anaconda 不可） |
 | **InvokeAI に導入済みのモデル** | SDXL / SD 1.x / FLUX / FLUX2 / Anima など、使いたいベースモデル |
 
 > ⚠️ **Conda / Anaconda の Python は使えません。** Qt の DLL が競合するため、`python.org` 配布の通常版 Python を使ってください。`install_windows.bat` は Conda 環境を自動的に避けます。
+> インストーラは Python 3.11 → 3.12 → 3.10 の順に探しますが、公開手順の基準は Python 3.11 です。
 
 ---
 

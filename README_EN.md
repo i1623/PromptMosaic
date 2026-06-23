@@ -16,7 +16,7 @@ It lets you build prompts as tiles, follow generation lineage in a history tree,
 
 > **Version:** 1.4.0
 > **Target InvokeAI:** 6.13 or later
-> **Supported OS:** Windows 11 (PySide6 / Python 3.10-3.12)
+> **Supported OS:** Windows 11 (PySide6 / Python 3.11 recommended)
 
 ---
 

@@ -16,7 +16,7 @@
 
 > **バージョン:** 1.4.0
 > **対象 InvokeAI:** 6.13 以降
-> **対応 OS:** Windows 11（PySide6 / Python 3.10〜3.12）
+> **対応 OS:** Windows 11（PySide6 / Python 3.11 推奨）
 
 ---
 

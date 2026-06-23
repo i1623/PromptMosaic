@@ -42,11 +42,12 @@ PromptMosaic itself does not generate images. InvokeAI must be running and reach
 ## 2. Requirements
 
 - Windows 11
-- Python 3.10-3.12 from python.org, or the Windows `py` launcher
+- Python 3.11 from python.org, or the Windows `py` launcher
 - InvokeAI 6.13 or later
 - A model that can generate images in InvokeAI
 
 Conda / Anaconda Python is not required. If Conda is installed, use the included installer and launcher so PromptMosaic can use its own normal virtual environment without being affected by Conda DLL paths.
+The installer searches for Python 3.11, then 3.12, then 3.10, but the public installation guide uses Python 3.11 as the recommended baseline.
 
 ---
 
