@@ -529,10 +529,8 @@ class SettingsDialog(QDialog):
             b.setStyleSheet(_settings_button_style(kind))
             return b
 
-        self._btn_tmpl_fetch = _styled(tr("settings.tmpl_btn_fetch"), "accent")
-        self._btn_tmpl_fetch.clicked.connect(self._on_template_fetch)
-        btn_row.addWidget(self._btn_tmpl_fetch)
-
+        # テンプレートの「取得」は初期セットアップ（InvokeAI データ取得）に集約。
+        # ここでは管理（名前変更・複製・既定設定・削除）のみ。
         self._btn_tmpl_rename = _styled(tr("settings.tmpl_btn_rename"))
         self._btn_tmpl_rename.clicked.connect(self._on_template_rename)
         btn_row.addWidget(self._btn_tmpl_rename)
@@ -609,36 +607,6 @@ class SettingsDialog(QDialog):
             return None
         item = self._tmpl_table.item(row, 0)
         return item.data(Qt.ItemDataRole.UserRole) if item else None
-
-    def _on_template_fetch(self) -> None:
-        from ui.template_dialog import FetchTemplateDialog
-        if not self._client:
-            QMessageBox.warning(self, tr("settings.tmpl_no_connection_title"), tr("settings.tmpl_no_connection_msg"))
-            return
-        rows = _env_db.fetchall(
-            "SELECT id, name, base, is_base_default FROM templates "
-            "ORDER BY base ASC, is_base_default DESC, name ASC"
-        )
-        existing = [dict(r) for r in rows]
-        dlg = FetchTemplateDialog(self, existing)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-        try:
-            if dlg.result_mode() == FetchTemplateDialog.MODE_OVERWRITE:
-                result = self._client.fetch_current_template(
-                    overwrite_template_id=dlg.result_overwrite_id(),
-                )
-            else:
-                name = dlg.result_name() or None
-                result = self._client.fetch_current_template(name=name)
-        except Exception as exc:
-            QMessageBox.warning(self, tr("settings.tmpl_fetch_fail_title"), str(exc))
-            return
-        QMessageBox.information(
-            self, tr("settings.tmpl_fetch_ok_title"),
-            tr("settings.tmpl_fetch_ok_msg", name=result["name"], base=result["base"], cache_key=result["cache_key"]),
-        )
-        self._refresh_templates_table()
 
     def _on_template_rename(self) -> None:
         tid = self._selected_template_id()

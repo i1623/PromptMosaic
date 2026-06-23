@@ -31,6 +31,17 @@ class InvokeConnectionError(Exception):
     """InvokeAIへの接続・通信エラー"""
 
 
+class TemplateBaseMismatch(Exception):
+    """ベース別テンプレ取得で、最新ジョブのベースが期待ベースと一致しない。"""
+
+    def __init__(self, expected_base: str, actual_base: str):
+        self.expected_base = expected_base
+        self.actual_base = actual_base
+        super().__init__(
+            f"最新ジョブのベース({actual_base})が期待ベース({expected_base})と一致しません。"
+        )
+
+
 def _settings() -> dict[str, str]:
     rows = _env_db.fetchall("SELECT key, value FROM env_settings WHERE key IN ('invoke_endpoint', 'invoke_queue_id')")
     return {r["key"]: r["value"] for r in rows}
@@ -442,6 +453,7 @@ class InvokeClient:
         model_base: str | None = None,
         loras_for_metadata: list[dict] | None = None,
         board_id: str | None = None,
+        skip_node_ids: set | None = None,
     ) -> bool:
         """
         グラフの nodes dict を in-place でパッチする。
@@ -479,8 +491,13 @@ class InvokeClient:
         else:
             model_identifier = InvokeClient._primary_model_identifier(nodes)
 
+        skip_node_ids = skip_node_ids or set()
         for node_id, node in nodes.items():
             ntype = node.get("type", "")
+
+            # リファイナー段のノードはテンプレ焼き込みのまま（モデル/Steps/CFG を触らない）
+            if node_id in skip_node_ids:
+                continue
 
             if board_id and "board" in node:
                 node["board"] = {"board_id": board_id}
@@ -730,6 +747,27 @@ class InvokeClient:
                 return key[:8] if key else ""
         return ""
 
+    # 主テキストエンコーダのフィールド名（優先順）。アーキ間で名前が違う。
+    _ENCODER_FIELDS = ("qwen3_encoder_model", "qwen_vl_encoder_model", "t5_encoder_model")
+
+    @staticmethod
+    def _detect_encoder(nodes: dict) -> tuple[str, str]:
+        """グラフの主テキストエンコーダの (key先頭8文字, 表示名) を返す。
+        モデルローダの qwen3 / qwen_vl / t5 エンコーダフィールドを優先順で探す。
+        SDXL / SD1.5 はエンコーダがモデル内蔵で別指定が無いため ("","")。"""
+        for node in nodes.values():
+            ntype = node.get("type", "")
+            if "model_loader" not in ntype or "lora" in ntype:
+                continue
+            for field in InvokeClient._ENCODER_FIELDS:
+                enc = node.get(field)
+                if isinstance(enc, dict):
+                    key = str(enc.get("key") or "")
+                    name = str(enc.get("name") or "")
+                    if key or name:
+                        return key[:8], name
+        return "", ""
+
     @staticmethod
     def _primary_model_identifier(nodes: dict) -> dict | None:
         """実生成に使われる main model identifier を model_loader から取得する。"""
@@ -743,20 +781,27 @@ class InvokeClient:
 
     @staticmethod
     def _cache_key_from_graph(graph: dict) -> str:
-        """
-        グラフからテンプレートキャッシュキーを生成する。
-
-        - 汎用: model.base をそのまま使用（ハイフンはアンダースコアに変換）
-          例: sdxl → sdxl、anima → anima、z-image → z_image
-        - flux2 のみ例外: エンコーダーキーを付与（4B / 9B で異なるため）
-          例: flux2_08140a70
-        """
+        """グラフから「そのベースの基準キャッシュキー」を返す（= base のみ）。
+        テンプレの中身は評価しない方針。設定違いの区別はユーザーが名前で行う。
+        自己修復/レガシー経路で「正しいベースのキー」を求めるのに使う。
+        新規取得のユニークキーは _new_cache_key_for_base を使う。"""
         nodes = graph.get("nodes", {})
-        base = InvokeClient._detect_base(nodes)
-        if base == "flux2":
-            enc = InvokeClient._detect_encoder_key(nodes)
-            return f"flux2_{enc}" if enc else "flux2"
-        return base.replace("-", "_")
+        return InvokeClient._detect_base(nodes).replace("-", "_")
+
+    @staticmethod
+    def _new_cache_key_for_base(base: str) -> str:
+        """ベースに対する未使用のキャッシュキーを返す。
+        1個目は base（例: sdxl）、2個目以降は base_v2, base_v3 …。"""
+        safe = base.replace("-", "_")
+        candidate = safe
+        n = 1
+        while (
+            _env_db.fetchone("SELECT 1 FROM templates WHERE cache_key=?", (candidate,))
+            or InvokeClient._template_cache_path(candidate).exists()
+        ):
+            n += 1
+            candidate = f"{safe}_v{n}"
+        return candidate
 
     @staticmethod
     def _template_cache_path(cache_key: str) -> Path:
@@ -860,181 +905,6 @@ class InvokeClient:
             nodes.pop(nid, None)
 
     @staticmethod
-    def _inject_lora_nodes(graph: dict, loras: list[dict]) -> bool:
-        """
-        有効な LoRA を graph に注入する。
-
-        loras: [{"invoke_key": str, "name": str, "base": str,
-                  "weight": float, "enabled": bool}, ...]
-
-        注入パターン（ベース共通）:
-          selector → lora_collector_1(collect) → lora_collector_2(collect) ... →
-          *_lora_collection_loader → intercept_fields → denoise 等
-
-        collect の item に複数 selector を並列接続すると、InvokeAI の実行順により
-        collection の順序が揺れる。LoRA の適用順は出力に影響し得るため、
-        collection 入力で collect を鎖状につないで順序を固定する。
-
-        ベース別の違い:
-          sdxl       : selector=lora_selector, loader=sdxl_lora_collection_loader,
-                       intercept=[unet, clip, clip2]
-          anima      : selector=lora_selector, loader=anima_lora_collection_loader,
-                       intercept=[transformer, qwen3_encoder]
-          qwen-image : selector=lora_selector, loader=qwen_image_lora_collection_loader,
-                       intercept=[transformer]
-          その他     : selector=lora_selector, loader=lora_collection_loader,
-                       intercept=[unet, clip]
-        """
-        import uuid
-
-        active = [l for l in loras if l.get("enabled", True)]
-        if not active:
-            return True  # LoRA不使用: strip 済みの直結グラフをそのまま使う
-
-        nodes = graph["nodes"]
-        edges = graph["edges"]
-
-        base = InvokeClient._detect_base(nodes)
-
-        # ベース別の LoRA ノード種別・intercept フィールドを決定
-        # ※ InvokeAI 6.13 確認: 全ベースで lora_selector を使う
-        if base == "sdxl":
-            selector_type    = "lora_selector"
-            coll_loader_type = "sdxl_lora_collection_loader"
-            intercept_fields = ["unet", "clip", "clip2"]
-        elif base == "flux":
-            selector_type    = "lora_selector"
-            coll_loader_type = "flux_lora_collection_loader"
-            intercept_fields = ["transformer", "clip", "t5_encoder"]
-        elif base == "flux2":
-            selector_type    = "lora_selector"
-            coll_loader_type = "flux2_klein_lora_collection_loader"
-            intercept_fields = ["transformer", "qwen3_encoder"]
-        elif base == "anima":
-            selector_type    = "lora_selector"
-            coll_loader_type = "anima_lora_collection_loader"
-            intercept_fields = ["transformer", "qwen3_encoder"]
-        elif base == "qwen-image":
-            selector_type    = "lora_selector"
-            coll_loader_type = "qwen_image_lora_collection_loader"
-            intercept_fields = ["transformer"]
-        elif base == "z-image":
-            selector_type    = "lora_selector"
-            coll_loader_type = "z_image_lora_collection_loader"
-            intercept_fields = ["transformer", "qwen3_encoder"]
-        else:
-            # sd-1 / flux / z-image 等
-            selector_type    = "lora_selector"
-            coll_loader_type = "lora_collection_loader"
-            intercept_fields = ["unet", "clip"]
-
-        # model_loader の node_id を特定（汎用: "model_loader" 含み "lora" 含まない型）
-        model_loader_id = None
-        for nid, node in nodes.items():
-            ntype = node.get("type", "")
-            if "model_loader" in ntype and "lora" not in ntype:
-                model_loader_id = nid
-                break
-        if not model_loader_id:
-            return False
-
-        # model_loader が直接配線している intercept フィールドの downstream を特定
-        # (strip 後は model_loader → denoise/pos_cond/neg_cond 等に直結)
-        downstream: list[dict] = []
-        keep_edges: list[dict] = []
-        for edge in edges:
-            if (edge["source"]["node_id"] == model_loader_id
-                    and edge["source"]["field"] in intercept_fields):
-                downstream.append(edge)
-            else:
-                keep_edges.append(edge)
-        if not downstream:
-            return False
-        graph["edges"] = keep_edges
-        edges = graph["edges"]   # ローカル変数を新リストに再バインド
-                                 # ↑ これがないと後続の edges.append が旧リストに
-                                 #   書き込まれ graph["edges"] に反映されない
-
-        # 新規ノード ID 生成（衝突しないよう uuid4 の短縮形を使用）
-        def _new_id(prefix: str) -> str:
-            return f"{prefix}:{uuid.uuid4().hex[:8]}"
-
-        # selector ノードを追加
-        selector_ids: list[str] = []
-        for lora in active:
-            sid = _new_id(selector_type)
-            nodes[sid] = {
-                "id":             sid,
-                "is_intermediate": True,
-                "use_cache":      True,
-                "lora": {
-                    "key":  lora["invoke_key"],
-                    "hash": lora.get("hash", ""),  # DB から取得した invoke_hash を使用
-                    "name": lora.get("name", ""),
-                    "base": lora.get("base", base),
-                    "type": "lora",
-                },
-                "weight": float(lora.get("weight", 0.75)),
-                "type":   selector_type,
-            }
-            selector_ids.append(sid)
-
-        # *_lora_collection_loader ノードを追加
-        # ※ InvokeAI の参照グラフではフィールド（loras / transformer 等）を null で定義せず、
-        #   edges での接続のみで表現する。null フィールドを含めると Pydantic が 422 を返す。
-        cl_id = _new_id(coll_loader_type)
-        nodes[cl_id] = {
-            "id":             cl_id,
-            "is_intermediate": True,
-            "use_cache":      True,
-            "type":           coll_loader_type,
-        }
-
-        # エッジを追加
-        # 1. selector → lora_collector を鎖状に接続する
-        prev_coll_id: str | None = None
-        last_coll_id: str | None = None
-        for idx, sid in enumerate(selector_ids):
-            coll_id = _new_id(f"lora_collector_{idx + 1}")
-            nodes[coll_id] = {
-                "id":             coll_id,
-                "is_intermediate": True,
-                "use_cache":      True,
-                "collection":     [],
-                "type":           "collect",
-            }
-            edges.append({"source": {"node_id": sid, "field": "lora"},
-                          "destination": {"node_id": coll_id, "field": "item"}})
-            if prev_coll_id is not None:
-                edges.append({
-                    "source": {"node_id": prev_coll_id, "field": "collection"},
-                    "destination": {"node_id": coll_id, "field": "collection"},
-                })
-            prev_coll_id = coll_id
-            last_coll_id = coll_id
-
-        # 2. 最後の lora_collector → collection_loader.loras
-        edges.append({"source": {"node_id": last_coll_id, "field": "collection"},
-                      "destination": {"node_id": cl_id, "field": "loras"}})
-        # 3. model_loader → collection_loader (intercept fields)
-        for field in intercept_fields:
-            edges.append({"source": {"node_id": model_loader_id, "field": field},
-                          "destination": {"node_id": cl_id, "field": field}})
-        # 4. collection_loader → 元の downstream を復元
-        for d_edge in downstream:
-            field = d_edge["source"]["field"]
-            edges.append({"source": {"node_id": cl_id, "field": field},
-                          "destination": d_edge["destination"]})
-
-        # core_metadata の loras フィールドは意図的に更新しない。
-        # InvokeAI のバージョンによって LoRAField のスキーマ（hash の必須性・型など）が
-        # 異なるため、書き換えると 422 バリデーションエラーになるケースがある。
-        # 実際の LoRA 適用はグラフノード（lora_selector→collector→collection_loader）
-        # 経由で行われるため、core_metadata を変更しなくても生成は正しく動作する。
-        # （PNG 埋め込みメタデータの loras 欄だけが旧値のままになる副作用はある）
-        return True
-
-    @staticmethod
     def _replace_lora_selectors(graph: dict, active_loras: list[dict]) -> bool:
         """
         テンプレートの lora_selector / anima_lora_loader ノードをユーザー指定の
@@ -1069,61 +939,62 @@ class InvokeClient:
         if not old_selector_ids:
             return False
 
-        # selector → collector の "item" エッジから collector_id を特定する。
-        # 壊れた selector だけが残っているテンプレートでは、ここで False を返して
-        # strip → inject の通常フローへフォールバックする。
+        # selector → collector のエッジから collector_id / 接続フィールドを特定する。
+        # 同時に「セレクターの出力フィールド名」「collector の入力フィールド名」も控える
+        # （決め打ちせずテンプレートの配線をそのまま踏襲するため）。
         collector_id: str | None = None
+        selector_out_field = "lora"
+        collector_in_field = "item"
         for edge in edges:
             if (edge["source"]["node_id"] in old_selector_ids
-                    and edge["destination"]["field"] == "item"):
+                    and edge["destination"]["field"] in ("item", "collection")):
                 collector_id = edge["destination"]["node_id"]
+                selector_out_field = edge["source"]["field"]
+                collector_in_field = edge["destination"]["field"]
                 break
         if collector_id is None:
             return False
 
-        # collector が見つかった場合のみ、既存 selector を新 selector に差し替える。
-        keep_edges: list[dict] = []
-        for edge in edges:
-            if edge["source"]["node_id"] in old_selector_ids:
-                # selector からのエッジは削除（新 selector 用に後で追加）
-                pass
-            else:
-                keep_edges.append(edge)
-        graph["edges"] = keep_edges
+        # 既存セレクターを「見本」として1つ確保（型・フィールド構造をそのまま複製する）。
+        sample_id = next(iter(old_selector_ids))
+        sample_selector = deepcopy(nodes[sample_id])
 
-        # 古い selector ノードを削除
+        # 見本から「LoRA モデル参照のフィールド名」と「weight フィールド名」を検出。
+        lora_ref_field = "lora"
+        weight_field = "weight" if "weight" in sample_selector else None
+        for k, v in sample_selector.items():
+            if isinstance(v, dict) and ("key" in v or v.get("type") == "lora"):
+                lora_ref_field = k
+                break
+
+        base = InvokeClient._detect_base(nodes)
+
+        # selector からのエッジを削除し、古い selector ノードも削除
+        graph["edges"] = [
+            e for e in edges if e["source"]["node_id"] not in old_selector_ids
+        ]
         for nid in old_selector_ids:
             nodes.pop(nid, None)
 
-        # 新しい selector ノードとエッジを追加
-        if active_loras and collector_id:
-            base = InvokeClient._detect_base(nodes)
-            # InvokeAI 6.13 確認: Anima も lora_selector を使う
-            selector_type = "lora_selector"
-
-            def _new_id(prefix: str) -> str:
-                return f"{prefix}:{uuid.uuid4().hex[:8]}"
-
-            for lora in active_loras:
-                sid = _new_id(selector_type)
-                nodes[sid] = {
-                    "id":              sid,
-                    "is_intermediate": True,
-                    "use_cache":       True,
-                    "lora": {
-                        "key":  lora["invoke_key"],
-                        "hash": lora.get("hash", ""),  # DB から取得した invoke_hash を使用
-                        "name": lora.get("name", ""),
-                        "base": lora.get("base", base),
-                        "type": "lora",
-                    },
-                    "weight": float(lora.get("weight", 0.75)),
-                    "type":   selector_type,
-                }
-                graph["edges"].append({
-                    "source":      {"node_id": sid,          "field": "lora"},
-                    "destination": {"node_id": collector_id, "field": "item"},
-                })
+        # 見本を複製して、ユーザー指定 LoRA ごとに新しい selector を作る
+        for lora in active_loras:
+            sid = f"{sample_selector.get('type', 'lora_selector')}:{uuid.uuid4().hex[:8]}"
+            node = deepcopy(sample_selector)
+            node["id"] = sid
+            node[lora_ref_field] = {
+                "key":  lora["invoke_key"],
+                "hash": lora.get("hash", ""),  # DB から取得した invoke_hash を使用
+                "name": lora.get("name", ""),
+                "base": lora.get("base", base),
+                "type": "lora",
+            }
+            if weight_field is not None:
+                node[weight_field] = float(lora.get("weight", 0.75))
+            nodes[sid] = node
+            graph["edges"].append({
+                "source":      {"node_id": sid,          "field": selector_out_field},
+                "destination": {"node_id": collector_id, "field": collector_in_field},
+            })
 
         return True
 
@@ -1151,6 +1022,23 @@ class InvokeClient:
                 return False
         return True
 
+    @staticmethod
+    def _graph_has_lora_path(graph: dict) -> bool:
+        """テンプレートに「見本にできる LoRA 経路」があるか。
+        セレクター(lora_selector/anima_lora_loader)が collector("item")へ繋がっていれば True。
+        この経路があれば _replace_lora_selectors で任意個の LoRA を差し替え注入できる。"""
+        nodes = graph.get("nodes", {})
+        edges = graph.get("edges", [])
+        selector_types = {"lora_selector", "anima_lora_loader"}
+        sel_ids = {nid for nid, n in nodes.items() if n.get("type") in selector_types}
+        if not sel_ids:
+            return False
+        return any(
+            e.get("source", {}).get("node_id") in sel_ids
+            and e.get("destination", {}).get("field") == "item"
+            for e in edges
+        )
+
     # ------------------------------------------------------------------
     # テンプレートキャッシュ（txt2img グラフの保存・再利用）
     # ------------------------------------------------------------------
@@ -1177,6 +1065,22 @@ class InvokeClient:
         return False
 
     @staticmethod
+    def _graph_has_refiner(graph: dict | None) -> bool:
+        """グラフに SDXL リファイナー（2段パイプライン）が含まれるか。
+        PromptMosaic は単段 txt2img 専用で、汎用上書きがリファイナーのモデル/Steps/CFG を
+        潰してしまうため、取り込み時にこれを弾く。
+        検出: type に "refiner" を含むノード、または model.base=="sdxl-refiner" のローダー。"""
+        if not graph:
+            return False
+        for node in graph.get("nodes", {}).values():
+            if "refiner" in node.get("type", "").lower():
+                return True
+            model = node.get("model")
+            if isinstance(model, dict) and model.get("base") == "sdxl-refiner":
+                return True
+        return False
+
+    @staticmethod
     def _graph_supports_negative_prompt(graph: dict | None) -> bool:
         """グラフに実生成へ届くネガティブプロンプト経路があるか判定する。"""
         if not graph:
@@ -1195,6 +1099,47 @@ class InvokeClient:
             return True
         graph = InvokeClient._load_template(cache_key)
         return InvokeClient._graph_supports_negative_prompt(graph)
+
+    @staticmethod
+    def _detect_vae(nodes: dict) -> tuple[str, str]:
+        """グラフに設定されている VAE の (key先頭8文字, 表示名) を返す。
+        vae_model フィールドを持つノード（model_loader / vae_loader）から取得する。
+        モデル内蔵で別VAE指定が無い場合（sdxl/sd-1 既定など）は ("","")。"""
+        for node in nodes.values():
+            if "vae_model" in node:
+                vm = node.get("vae_model") or {}
+                key = str(vm.get("key") or "")
+                name = str(vm.get("name") or "")
+                if key or name:
+                    return key[:8], name
+        return "", ""
+
+    @staticmethod
+    def _refiner_node_ids(graph: dict | None) -> set:
+        """SDXL リファイナー段に属するノードID集合（実生成の上書き対象から除外する）。
+        - type に "refiner" を含むノード（refiner compel など）
+        - model.base=="sdxl-refiner" のモデルローダー
+        - そのローダーの unet/transformer 出力を受け取る denoise ノード（リファイナー段）
+        """
+        ids: set = set()
+        if not graph:
+            return ids
+        nodes = graph.get("nodes", {})
+        loader_ids: set = set()
+        for nid, n in nodes.items():
+            ntype = n.get("type", "").lower()
+            if "refiner" in ntype:
+                ids.add(nid)
+            model = n.get("model")
+            if "model_loader" in ntype and isinstance(model, dict) and model.get("base") == "sdxl-refiner":
+                ids.add(nid)
+                loader_ids.add(nid)
+        for e in graph.get("edges", []):
+            src = e.get("source", {})
+            dst = e.get("destination", {})
+            if src.get("node_id") in loader_ids and dst.get("field") in ("unet", "transformer"):
+                ids.add(dst.get("node_id"))
+        return ids
 
     @staticmethod
     def _register_template_if_absent(graph: dict, cache_key: str) -> int | None:
@@ -1224,119 +1169,119 @@ class InvokeClient:
             suffix += 1
             name = f"{base_name} ({suffix})"
         cur = _env_db.execute(
-            "INSERT INTO templates (name, base, cache_key, is_base_default) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO templates (name, base, cache_key, is_base_default) VALUES (?, ?, ?, ?)",
             (name, base, cache_key, is_default),
         )
         return cur.lastrowid
 
-    def fetch_current_template(
-        self, overwrite_template_id: int | None = None, name: str | None = None
-    ) -> dict:
-        """
-        InvokeAI の最新完了ジョブから txt2img グラフを取得してテンプレート登録する。
+    def fetch_template_graph(self, expected_base: str | None = None) -> dict:
+        """InvokeAI の最新完了ジョブの txt2img グラフを取得して返す（保存はしない）。
+        中身の評価はせずベースだけ確認する。命名はこの後 UI 側で行い save_fetched_template で保存。
 
-        Args:
-            overwrite_template_id: 指定時は既存テンプレートに上書き保存。
-            name: 新規作成時の名前（None なら自動生成）。
-
-        Returns:
-            {"template_id": int, "name": str, "base": str, "cache_key": str}
-
+        Returns: {"graph": dict, "base": str}
         Raises:
             InvokeConnectionError
+            TemplateBaseMismatch: expected_base と最新ジョブのベースが不一致
         """
         item_id = self.get_latest_item_id()
         if item_id is None:
             raise InvokeConnectionError(
-                "テンプレートとなる完了済みジョブが見つかりません。"
-                "InvokeAI で一度手動生成してください。"
+                "テンプレートにできる生成が見つかりません。\n"
+                "InvokeAI で一度画像を生成してください。"
             )
         item = self.get_queue_item(item_id)
         graph = item["session"]["graph"]
         if not self._is_txt2img_graph(graph):
             raise InvokeConnectionError(
-                "最新の InvokeAI ジョブは txt2img ではありません。\n"
+                "最新の InvokeAI の生成は txt2img ではありません。\n"
                 "InvokeAI で txt2img 生成を1回行ってから再度お試しください。"
             )
         base = self._detect_base(graph.get("nodes", {}))
-
-        if overwrite_template_id is not None:
-            # 既存を上書き（cache_key を引き継ぐ、base/encoder が変わっていれば警告付きで cache_key も更新）
-            row = _env_db.fetchone(
-                "SELECT cache_key, base, name FROM templates WHERE id=?",
-                (overwrite_template_id,),
+        if expected_base is not None and base != expected_base:
+            raise TemplateBaseMismatch(expected_base, base)
+        # LoRA は「テンプレの LoRA 経路を見本に」差し替え注入する方式。
+        # そのため取得する生成には LoRA が1つ以上含まれている必要がある。
+        if not self._graph_has_lora_path(graph):
+            raise InvokeConnectionError(
+                "直近の生成に LoRA が含まれていません。\n"
+                "PromptMosaic は取得するテンプレートの LoRA 経路を見本にするため、\n"
+                "InvokeAI で LoRA を1つ以上使って画像を生成してから、再度取得してください。"
             )
-            if not row:
-                raise InvokeConnectionError(
-                    f"上書き対象テンプレート (id={overwrite_template_id}) が存在しません。"
-                )
-            new_cache_key = self._cache_key_from_graph(graph)
-            # cache_key が変わる場合（例: flux2 のエンコーダーが違う）は DB を更新
-            cache_key = new_cache_key
-            self._save_template(graph, cache_key)
-            _env_db.execute(
-                "UPDATE templates SET base=?, cache_key=?, updated_at=CURRENT_TIMESTAMP "
-                "WHERE id=?",
-                (base, cache_key, overwrite_template_id),
-            )
-            return {
-                "template_id": overwrite_template_id,
-                "name": row["name"],
-                "base": base,
-                "cache_key": cache_key,
-            }
+        return {"graph": graph, "base": base}
 
-        # 新規作成
-        cache_key = self._cache_key_from_graph(graph)
-        # cache_key が既に使われていたら、同じファイルが同じ中身の可能性があるので上書き
-        # （同じ cache_key に対して複数の templates 行は UNIQUE 制約で禁止）
-        existing = _env_db.fetchone(
-            "SELECT id FROM templates WHERE cache_key=?", (cache_key,),
-        )
-        if existing:
-            self._save_template(graph, cache_key)
-            if name:
-                _env_db.execute(
-                    "UPDATE templates SET name=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (name, existing["id"]),
-                )
-            row = _env_db.fetchone(
-                "SELECT name, base FROM templates WHERE id=?", (existing["id"],),
-            )
-            return {
-                "template_id": existing["id"],
-                "name": row["name"],
-                "base": row["base"],
-                "cache_key": cache_key,
-            }
+    @staticmethod
+    def suggested_template_name(base: str) -> str:
+        """そのベースの新規テンプレ候補名。1個目=Default、2個目以降=Default2, Default3…。"""
+        cnt = _env_db.fetchone("SELECT COUNT(*) AS c FROM templates WHERE base=?", (base,))
+        n = int(cnt["c"] or 0) if cnt else 0
+        return "Default" if n == 0 else f"Default{n + 1}"
 
-        # 完全に新規
-        self._save_template(graph, cache_key)
-        has_default = _env_db.fetchone(
-            "SELECT 1 FROM templates WHERE base=? AND is_base_default=1", (base,),
-        )
-        is_default = 0 if has_default else 1
-        final_name = name or ("Default" if is_default else cache_key)
-        # UNIQUE(base, name) 対策
-        suffix = 1
-        base_name = final_name
+    @staticmethod
+    def save_fetched_template(graph: dict, base: str, name: str | None = None) -> dict:
+        """取得したグラフを「常に新しいテンプレート」として保存する。
+        中身の評価・重複判定はしない（同一でも別行として登録される）。
+        name 未指定なら suggested_template_name。同ベース内で名前衝突したら連番付与。"""
+        name = (name or "").strip() or InvokeClient.suggested_template_name(base)
+        cache_key = InvokeClient._new_cache_key_for_base(base)
+        InvokeClient._save_template(graph, cache_key)
+        is_default = 0 if _env_db.fetchone(
+            "SELECT 1 FROM templates WHERE base=? AND is_base_default=1", (base,)
+        ) else 1
+        final_name = name
+        n = 1
         while _env_db.fetchone(
-            "SELECT 1 FROM templates WHERE base=? AND name=?", (base, final_name),
+            "SELECT 1 FROM templates WHERE base=? AND name=?", (base, final_name)
         ):
-            suffix += 1
-            final_name = f"{base_name} ({suffix})"
+            n += 1
+            final_name = f"{name} ({n})"
         cur = _env_db.execute(
-            "INSERT INTO templates (name, base, cache_key, is_base_default) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO templates (name, base, cache_key, is_base_default) VALUES (?, ?, ?, ?)",
             (final_name, base, cache_key, is_default),
         )
         return {
-            "template_id": cur.lastrowid,
-            "name": final_name,
-            "base": base,
-            "cache_key": cache_key,
+            "template_id": cur.lastrowid, "name": final_name,
+            "base": base, "cache_key": cache_key,
         }
+
+    @staticmethod
+    def delete_template(template_id: int) -> None:
+        """テンプレート行を削除し、他に使われていなければキャッシュファイルも消す。"""
+        row = _env_db.fetchone("SELECT cache_key FROM templates WHERE id=?", (template_id,))
+        if not row:
+            return
+        cache_key = row["cache_key"]
+        _env_db.execute("DELETE FROM templates WHERE id=?", (template_id,))
+        still = _env_db.fetchone(
+            "SELECT 1 FROM templates WHERE cache_key=? LIMIT 1", (cache_key,)
+        )
+        if not still:
+            try:
+                path = InvokeClient._template_cache_path(cache_key)
+                if path.exists():
+                    path.unlink()
+            except Exception:
+                pass
+
+    @staticmethod
+    def rename_template(template_id: int, new_name: str) -> bool:
+        """テンプレート名を変更する。同ベース内で重複したら False。"""
+        new_name = (new_name or "").strip()
+        if not new_name:
+            return False
+        row = _env_db.fetchone("SELECT base FROM templates WHERE id=?", (template_id,))
+        if not row:
+            return False
+        dup = _env_db.fetchone(
+            "SELECT 1 FROM templates WHERE base=? AND name=? AND id!=?",
+            (row["base"], new_name, template_id),
+        )
+        if dup:
+            return False
+        _env_db.execute(
+            "UPDATE templates SET name=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (new_name, template_id),
+        )
+        return True
 
     @staticmethod
     def _extract_model_invoke_key(graph: dict) -> str | None:
@@ -1356,9 +1301,19 @@ class InvokeClient:
         """キャッシュキーから期待されるモデルベース名を返す。
 
         例: sdxl→sdxl, anima→anima, z_image→z-image, flux→flux, flux2_*→flux2, sd_1→sd-1
+        VAE/リファイナーのサフィックス（_vae<hex> / _rf）は base 判定の前に取り除く。
         """
-        if cache_key.startswith("flux2"):
+        import re as _re
+        core = cache_key
+        # 複数テンプレ用の連番サフィックス _v2, _v3 … を取り除く
+        core = _re.sub(r"_v[0-9]+$", "", core)
+        if core.startswith("flux2"):
             return "flux2"
+        # 旧フォーマット互換: VAE/エンコーダ/リファイナーのサフィックスも剥がす
+        if core.endswith("_rf"):
+            core = core[:-3]
+        core = _re.sub(r"_vae[0-9a-f]+$", "", core)
+        core = _re.sub(r"_enc[0-9a-f]+$", "", core)
         mapping = {
             "sdxl":       "sdxl",
             "sd_1":       "sd-1",
@@ -1367,7 +1322,7 @@ class InvokeClient:
             "anima":      "anima",
             "qwen_image": "qwen-image",
         }
-        return mapping.get(cache_key, cache_key.replace("_", "-"))
+        return mapping.get(core, core.replace("_", "-"))
 
     @staticmethod
     def _save_template(graph: dict, cache_key: str) -> None:
@@ -1770,29 +1725,26 @@ class InvokeClient:
                 )
             loras_for_metadata = active
             if active:
-                # 既存テンプレートに LoRA 経路がある場合は、その経路を保ったまま
-                # selector だけ差し替える。Anima 等は collection loader 周辺の接続を
-                # こちらで組み直すと InvokeAI 実行時に device mismatch になることがある。
+                # テンプレートの LoRA 経路を見本に、selector だけユーザー指定 LoRA へ差し替える。
+                # （取得時に LoRA 経路の存在を必須化しているので、通常ここで成功する）
                 injected = self._replace_lora_selectors(graph, active)
                 if not injected or not self._has_lora_application(graph, expected_count=len(active)):
-                    # LoRA 経路が無い/壊れているテンプレートでは、直結グラフに戻して再作成する。
-                    # 生成を止めるのではなく、まず自己修復を優先する。
+                    # 見本経路が無い/壊れている（旧形式テンプレ等）→ 決め打ち注入は廃止したので
+                    # LoRAなしで生成を続行する（実生成と metadata を揃える）。
+                    print(
+                        "[PromptMosaic] 警告: テンプレートに LoRA 経路がありません。"
+                        "LoRAなしで生成を続行します。LoRA入りで取得し直してください。",
+                        file=sys.stderr, flush=True,
+                    )
                     self._strip_lora_nodes(graph)
-                    injected = self._inject_lora_nodes(graph, active)
-                    if not injected or not self._has_lora_application(graph, expected_count=len(active)):
-                        # それでも適用できないテンプレートでは、metadata だけに LoRA を残すと
-                        # 原因調査を難しくするため、実生成と metadata を LoRAなしに揃えて続行する。
-                        print(
-                            "[PromptMosaic] 警告: LoRA経路を自動修復できませんでした。"
-                            "LoRAなしで生成を続行します。",
-                            file=sys.stderr, flush=True,
-                        )
-                        self._strip_lora_nodes(graph)
-                        loras_for_metadata = []
+                    loras_for_metadata = []
             else:
                 # LoRA なし（またはすべて無効）: テンプレートのLoRAを除去
                 self._strip_lora_nodes(graph)
 
+            # リファイナー段のノードは上書きしない（モデル/Steps/CFG をテンプレ焼き込みの
+            # まま使う）。ベース段だけにパラメータを適用してリファイナーを壊さない。
+            skip_ids = self._refiner_node_ids(graph)
             ok = self._patch_nodes(
                 graph["nodes"], pos_for_seed, negative_prompt,
                 seed_i, steps, cfg_scale, scheduler, width, height,
@@ -1802,6 +1754,7 @@ class InvokeClient:
                 model_base=selected_model_base,
                 loras_for_metadata=loras_for_metadata,
                 board_id=board_id,
+                skip_node_ids=skip_ids,
             )
             if not ok:
                 raise InvokeConnectionError(

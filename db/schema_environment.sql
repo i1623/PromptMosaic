@@ -129,6 +129,9 @@ CREATE TABLE IF NOT EXISTS templates (
     base            TEXT NOT NULL,
     cache_key       TEXT UNIQUE NOT NULL,
     is_base_default INTEGER DEFAULT 0,
+    vae_name        TEXT DEFAULT '',     -- 取り込み時に検出した VAE 名（空=モデル内蔵/未指定）
+    has_refiner     INTEGER DEFAULT 0,   -- リファイナー段を含むか（1=含む）
+    encoder_name    TEXT DEFAULT '',     -- 主テキストエンコーダ名（空=モデル内蔵/未指定）
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(base, name)

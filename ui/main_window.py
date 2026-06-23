@@ -1465,6 +1465,17 @@ class MainWindow(QMainWindow):
         row = _env_db.fetchone("SELECT 1 FROM templates LIMIT 1")
         return row is not None
 
+    def _current_base_has_template(self) -> bool:
+        """生成可能か: 現在のモデルのベースにテンプレートがあるか。
+        プラン時は行ごとに解決するため全体の有無で判定。"""
+        if self._is_plan_mode():
+            return self._has_generation_template()
+        base = self._current_base
+        if not base:
+            return self._has_generation_template()
+        row = _env_db.fetchone("SELECT 1 FROM templates WHERE base=? LIMIT 1", (base,))
+        return row is not None
+
     def _has_prompt_for_generation(self) -> bool:
         if not hasattr(self, "_editor"):
             return False
@@ -1498,7 +1509,7 @@ class MainWindow(QMainWindow):
                 w.setEnabled(False)
             return
 
-        if not self._has_generation_template():
+        if not self._current_base_has_template():
             for btn in buttons:
                 btn.setEnabled(False)
                 btn.setToolTip(tr("main.generate_disabled_no_template"))
@@ -1841,6 +1852,25 @@ class MainWindow(QMainWindow):
             data.get("base") or "sdxl",
             data.get("variant") or "",
         )
+
+    def _revert_model_combo(self) -> None:
+        """モデルコンボを現在の _selected_model_key の項目に戻す（信号抑止）。
+        テンプレ選択がキャンセル/未取得でモデル切替を中断した時に呼ぶ。"""
+        if not hasattr(self, "_model_combo"):
+            return
+        key = self._selected_model_key
+        self._model_combo.blockSignals(True)
+        try:
+            target = -1
+            for i in range(self._model_combo.count()):
+                data = self._model_combo.itemData(i)
+                if isinstance(data, dict) and data.get("invoke_key") == key:
+                    target = i
+                    break
+            if target >= 0:
+                self._model_combo.setCurrentIndex(target)
+        finally:
+            self._model_combo.blockSignals(False)
 
     def _set_left_mode(self, mode: str, *, animate: bool = True) -> None:
         if not hasattr(self, "_left_stack"):
@@ -6329,11 +6359,12 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # テンプレート選択（毎回問う、複数時のみダイアログ）
+        # テンプレート選択（複数時のみ一覧から1クリック選択。0個/キャンセルは中断）
         from ui.template_dialog import choose_template_for_model
         template_id = choose_template_for_model(self, name, base)
         if template_id is None:
-            # 0個または複数時のキャンセル → モデル選択自体を中断
+            # 0個 or キャンセル → モデル選択を中断し、コンボを前のモデルへ戻す
+            self._revert_model_combo()
             self._show_status(tr("main.template_not_selected"), error=True)
             return
 
@@ -6360,8 +6391,8 @@ class MainWindow(QMainWindow):
         # 自動読み込みLoRAを追加
         self._add_auto_loras(invoke_key)
 
-        # このモデルで前回使用したパラメータを復元（steps/CFGは確認ダイアログあり）
-        self._propose_gen_params_with_dialog(invoke_key)
+        # モデル注釈の既定値があれば静かに適用（無ければ UI はそのまま）
+        self._apply_model_default_params(invoke_key)
 
         self._show_status(
             f"モデル選択: {name} ({base}) / テンプレート: {self._current_template_name}"
@@ -6564,76 +6595,37 @@ class MainWindow(QMainWindow):
         if changed:
             self._editor.refresh_tiles_from_document()
 
-    def _propose_gen_params_with_dialog(self, invoke_key: str) -> None:
-        """
-        履歴（最終生成）またはモデルDB設定から steps/CFG を取得し、
-        現在値と異なる場合のみ確認ダイアログを表示して適用する。
-        スケジューラは確認なしで静かに適用する。
-        画像サイズは制作中の構図に直結するため、モデル選択では変更しない。
-        """
-        proposed_steps: int | None = None
-        proposed_cfg:   float | None = None
-        proposed_sched: str | None = None
-
-        # 1. 履歴（この invoke_key で最後に生成した値）を優先
-        hist = _history_db.fetchone(
-            "SELECT steps, cfg_scale, scheduler "
-            "FROM generations WHERE invoke_key=? ORDER BY id DESC LIMIT 1",
+    def _apply_model_default_params(self, invoke_key: str) -> None:
+        """モデル注釈のデフォルト値(default_steps/cfg/scheduler)が設定されていれば
+        確認なしで静かに適用する。設定が無ければ UI はそのまま（前回使用値は記憶しない）。
+        画像サイズは構図に直結するためモデル選択では変更しない。
+        スケジューラのベース別リスト切替は別途 _apply_base_ui が行う（現状維持）。"""
+        mrow = _env_db.fetchone(
+            "SELECT default_steps, default_cfg, default_scheduler FROM models WHERE invoke_key=?",
             (invoke_key,),
         )
-        if hist:
-            if hist["steps"]:        proposed_steps = int(hist["steps"])
-            if hist["cfg_scale"] is not None: proposed_cfg = float(hist["cfg_scale"])
-            if hist["scheduler"]:    proposed_sched = str(hist["scheduler"])
-        else:
-            # 2. 履歴がなければモデル注釈のデフォルト値
-            mrow = _env_db.fetchone(
-                "SELECT default_steps, default_cfg, default_scheduler FROM models WHERE invoke_key=?",
-                (invoke_key,),
-            )
-            if mrow:
-                if mrow["default_steps"] is not None:          proposed_steps = int(mrow["default_steps"])
-                if mrow["default_cfg"] is not None and mrow["default_cfg"] > 0.0:
-                    proposed_cfg = float(mrow["default_cfg"])
-                if mrow["default_scheduler"]:                  proposed_sched = str(mrow["default_scheduler"])
+        if not mrow:
+            return
+        from core.gen_params import cfg_is_locked
 
-        # スケジューラは確認なしで適用
-        if proposed_sched and self._sched_combo.isEnabled():
-            idx = self._sched_combo.findText(proposed_sched)
+        # スケジューラ（注釈の既定があれば適用）
+        sched = mrow["default_scheduler"]
+        if sched and self._sched_combo.isEnabled():
+            idx = self._sched_combo.findText(str(sched))
             if idx >= 0:
                 self._sched_combo.setCurrentIndex(idx)
 
-        # CFG ロック対象ベース（flux2 等）は CFG を提案・変更しない（1.0 固定のまま）
-        from core.gen_params import cfg_is_locked
-        if cfg_is_locked(self._current_base):
-            proposed_cfg = None
+        # ステップ数
+        if mrow["default_steps"] is not None:
+            self._steps_spin.setValue(int(mrow["default_steps"]))
 
-        # steps / CFG が変わる場合のみダイアログ
-        steps_diff = proposed_steps is not None and proposed_steps != self._steps_spin.value()
-        cfg_diff   = proposed_cfg   is not None and abs(proposed_cfg - self._cfg_spin.value()) > 0.01
-
-        if not steps_diff and not cfg_diff:
-            return
-
-        lines: list[str] = []
-        if steps_diff:
-            lines.append(f"Steps:  {self._steps_spin.value()}  →  {proposed_steps}")
-        if cfg_diff:
-            lines.append(f"CFG:    {self._cfg_spin.value():.1f}  →  {proposed_cfg:.1f}")
-        msg = tr("main.model_params_changed_msg", changes="\n".join(lines))
-
-        box = QMessageBox(self)
-        box.setWindowTitle(tr("main.model_params_changed_title"))
-        box.setText(msg)
-        apply_btn = box.addButton(tr("main.model_params_apply"), QMessageBox.ButtonRole.AcceptRole)
-        box.addButton(tr("main.model_params_keep"), QMessageBox.ButtonRole.RejectRole)
-        box.exec()
-        if box.clickedButton() is not apply_btn:
-            return
-        if steps_diff:
-            self._steps_spin.setValue(proposed_steps)
-        if cfg_diff:
-            self._cfg_spin.setValue(proposed_cfg)
+        # CFG（flux2 等のロック対象ベースは 1.0 固定のまま触らない）
+        if (
+            mrow["default_cfg"] is not None
+            and mrow["default_cfg"] > 0.0
+            and not cfg_is_locked(self._current_base)
+        ):
+            self._cfg_spin.setValue(float(mrow["default_cfg"]))
 
     # ── LoRAブラウザ連携 ─────────────────────────────────
 

@@ -37,6 +37,7 @@ def initialize_all() -> None:
     _ensure_all_schemas()
     _load_active_selections()
     _ensure_blob_columns()
+    _ensure_template_columns()
     _rebuild_caches()
 
 
@@ -154,6 +155,20 @@ def _ensure_blob_columns() -> None:
         _add(conn, "prompt_texts", "thumbnail_data")
         _add(conn, "concepts", "thumbnail_data")
 
+
+
+def _ensure_template_columns() -> None:
+    """既存の environment DB の templates 表に vae_name / has_refiner 列を追加する
+    （取り込み時に検出したテンプレの個性を表示・識別するため）。"""
+    conn = connections.get_environment_conn()
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(templates)").fetchall()}
+    if "vae_name" not in existing:
+        conn.execute("ALTER TABLE templates ADD COLUMN vae_name TEXT DEFAULT ''")
+    if "has_refiner" not in existing:
+        conn.execute("ALTER TABLE templates ADD COLUMN has_refiner INTEGER DEFAULT 0")
+    if "encoder_name" not in existing:
+        conn.execute("ALTER TABLE templates ADD COLUMN encoder_name TEXT DEFAULT ''")
+    conn.commit()
 
 
 def _rebuild_caches() -> None:

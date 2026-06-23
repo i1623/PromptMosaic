@@ -17,46 +17,61 @@ import db.env_db as _env_db
 from core.i18n import tr
 
 
+def template_badge(t: dict) -> str:
+    """テンプレの個性（VAE名・リファイナー有無・エンコーダ名）を表すバッジ文字列。
+    例: "  · VAE: sdxl-vae-fp16-fix  · リファイナー  · Enc: t5_base_encoder"。無ければ空。"""
+    parts = template_badge_parts(t)
+    return ("  · " + "  · ".join(parts)) if parts else ""
+
+
+def template_badge_parts(t: dict) -> list[str]:
+    """バッジ要素のリスト（表のセルなどで個別に使う用）。"""
+    parts = []
+    vae = (t.get("vae_name") or "").strip()
+    if vae:
+        parts.append(tr("template_dialog.badge_vae", name=vae))
+    if t.get("has_refiner"):
+        parts.append(tr("template_dialog.badge_refiner"))
+    enc = (t.get("encoder_name") or "").strip()
+    if enc:
+        parts.append(tr("template_dialog.badge_encoder", name=enc))
+    return parts
+
+
 class TemplateChooserDialog(QDialog):
-    """ベースに複数テンプレートがある時の選択ダイアログ。Default が初期選択。"""
+    """ベースに複数テンプレートがある時の選択ダイアログ。
+    各テンプレートをボタンとして並べ、1クリックで選択して閉じる。"""
 
     def __init__(self, parent, templates: list[dict], model_name: str, base: str) -> None:
         super().__init__(parent)
         self.setWindowTitle(tr("template_dialog.chooser_title"))
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(460)
+        self._chosen_id: int | None = None
 
         lay = QVBoxLayout(self)
-
         info = QLabel(tr("template_dialog.chooser_info", name=model_name, base=base))
         info.setWordWrap(True)
         lay.addWidget(info)
+        lay.addSpacing(6)
 
-        lay.addSpacing(8)
-
-        row = QHBoxLayout()
-        row.addWidget(QLabel(tr("template_dialog.chooser_template_label")))
-        self._combo = QComboBox()
-        default_idx = 0
-        for i, t in enumerate(templates):
+        for t in templates:
             mark = "  ★" if t["is_base_default"] else ""
-            self._combo.addItem(f"{t['name']}{mark}", t["id"])
-            if t["is_base_default"]:
-                default_idx = i
-        self._combo.setCurrentIndex(default_idx)
-        row.addWidget(self._combo, 1)
-        lay.addLayout(row)
+            btn = QPushButton(f"{t['name']}{mark}")
+            btn.setStyleSheet("QPushButton { text-align: left; padding: 8px 10px; }")
+            btn.clicked.connect(lambda _=False, i=int(t["id"]): self._choose(i))
+            lay.addWidget(btn)
 
-        lay.addSpacing(8)
-
-        btns = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        btns.accepted.connect(self.accept)
+        lay.addStretch(1)
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
         btns.rejected.connect(self.reject)
         lay.addWidget(btns)
 
+    def _choose(self, template_id: int) -> None:
+        self._chosen_id = template_id
+        self.accept()
+
     def selected_template_id(self) -> int | None:
-        return self._combo.currentData()
+        return self._chosen_id
 
 
 def choose_template_for_model(
