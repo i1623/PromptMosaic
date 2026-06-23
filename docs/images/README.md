@@ -13,8 +13,9 @@
 | `windows_extract_zip.png` | Windows の「すべて展開」画面 | TUTORIAL |
 | `install_files.png` | 展開後フォルダ内の install_windows.bat と PromptMosaic.bat | TUTORIAL |
 | `windows_batch_security_warning.png` | バッチファイル実行時に出る Windows の発行元確認警告 | TUTORIAL |
+| `install_progress.png` | install_windows.bat 実行中のコンソール | TUTORIAL |
+| `install_complete.png` | install_windows.bat 完了後のコンソール | TUTORIAL |
 | `main_window.png` | 起動直後のメイン画面全体 | TUTORIAL |
-| `install_console.png` | install_windows.bat 実行後のコンソール | TUTORIAL |
 | `invoke_setup.png` | InvokeAI データ取得ウィザード | TUTORIAL |
 | `three_panes.png` | 3 ペインに番号を振った注釈付き画面 | TUTORIAL |
 | `tiles.png` | タイルを並べた中央ペイン | TUTORIAL |

@@ -96,6 +96,14 @@ install_windows.bat
 
 黒い画面が開き、自動でインストールが進みます。成功すると `.venv` フォルダが作られ、最後に `Install complete.` と表示されます。
 
+インストール中は、下のように文字がたくさん流れます。これは Python の部品を入れている途中なので、閉じずにそのまま待ってください。
+
+![PromptMosaic のインストール中画面](images/install_progress.png)
+
+最後に `Install complete.` と表示されたら成功です。`Start PromptMosaic with: PromptMosaic.bat` と表示されたら、次は `PromptMosaic.bat` を使って起動します。
+
+![PromptMosaic のインストール完了画面](images/install_complete.png)
+
 途中で失敗した場合も、黒い画面はすぐ閉じません。英語のメッセージが表示されるので、その内容を確認してからキーボードの何かのキーを押して閉じてください。
 
 ### 3-3. 起動する
@@ -108,9 +116,6 @@ PromptMosaic.bat
 ```
 
 2 回目以降は、`install_windows.bat` ではなく `PromptMosaic.bat` を使います。
-
-> 📷 *スクリーンショット差し込み位置: install_windows.bat 実行後のコンソール*
-> `docs/images/install_console.png`
 
 ---
 

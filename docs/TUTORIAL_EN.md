@@ -97,14 +97,19 @@ install_windows.bat
 
 A black console window opens and installation runs automatically. When it succeeds, a `.venv` folder is created and the message `Install complete.` appears.
 
+During installation, many lines of text may scroll by like the screen below. This is Python installing required packages, so leave the window open and wait.
+
+![PromptMosaic installation in progress](images/install_progress.png)
+
+When `Install complete.` appears, installation succeeded. If you see `Start PromptMosaic with: PromptMosaic.bat`, launch PromptMosaic with `PromptMosaic.bat` next.
+
+![PromptMosaic installation complete](images/install_complete.png)
+
 If installation fails, the console does not close immediately. Read the message, then press any key to close it.
 
 ### 3-3. Launch
 
 After installation finishes, double-click `PromptMosaic.bat` in the same folder.
-
-> Screenshot placeholder: console after running `install_windows.bat`
-> `docs/images/install_console.png`
 
 ```bat
 PromptMosaic.bat

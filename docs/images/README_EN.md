@@ -13,8 +13,9 @@ File names match the screenshot placeholder comments in each document.
 | `windows_extract_zip.png` | Windows Extract All screen | TUTORIAL |
 | `install_files.png` | Extracted folder showing install_windows.bat and PromptMosaic.bat | TUTORIAL |
 | `windows_batch_security_warning.png` | Windows publisher warning shown when running the batch file | TUTORIAL |
+| `install_progress.png` | Console while install_windows.bat is running | TUTORIAL |
+| `install_complete.png` | Console after install_windows.bat completes | TUTORIAL |
 | `main_window.png` | Full main window immediately after launch | TUTORIAL |
-| `install_console.png` | Console after running `install_windows.bat` | TUTORIAL |
 | `invoke_setup.png` | InvokeAI Data Acquisition wizard | TUTORIAL |
 | `three_panes.png` | Annotated three-pane main window | TUTORIAL |
 | `tiles.png` | Center pane with arranged tiles | TUTORIAL |
