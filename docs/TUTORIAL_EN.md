@@ -67,11 +67,15 @@ This section is written for people who have never used GitHub before.
 5. Right-click the downloaded ZIP file and choose **Extract All**.
 6. Extract it somewhere easy to find, such as your Documents folder or `D:\tools`.
 
-> Screenshot placeholder: GitHub Code -> Download ZIP menu
-> `docs/images/github_download_zip.png`
+![Choose Download ZIP from the GitHub Code menu](images/github_download_zip.png)
 
-> Screenshot placeholder: Windows Extract All screen
-> `docs/images/windows_extract_zip.png`
+When the ZIP file appears in your browser's download list, open it or open the folder where it was saved.
+
+![Check the PromptMosaic-main.zip download in the browser](images/browser_download_zip.png)
+
+Open the ZIP file, then copy or extract the contents into a normal folder. Wait until extraction finishes.
+
+![Extract PromptMosaic files from the ZIP file](images/windows_extract_zip.png)
 
 > Downloading only `install_windows.bat` will not work. PromptMosaic needs many files together, including `main.py`, `requirements.txt`, and the `ui` folder. Always extract the whole ZIP file.
 
@@ -79,8 +83,7 @@ This section is written for people who have never used GitHub before.
 
 Open the extracted folder. Double-click `install_windows.bat`.
 
-> Screenshot placeholder: extracted folder showing `install_windows.bat` and `PromptMosaic.bat`
-> `docs/images/install_files.png`
+![Extracted folder showing install_windows.bat and PromptMosaic.bat](images/install_files.png)
 
 ```bat
 install_windows.bat
