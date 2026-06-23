@@ -1,6 +1,45 @@
 @echo off
 setlocal EnableExtensions
 cd /d "%~dp0"
+title PromptMosaic installer
+
+call :main
+set "RESULT=%ERRORLEVEL%"
+echo.
+if "%RESULT%"=="0" (
+    echo Install complete.
+    echo Start PromptMosaic with:
+    echo   PromptMosaic.bat
+) else (
+    echo Install failed. Error code: %RESULT%
+    echo.
+    echo If this window opened and closed immediately before, run this file again
+    echo from the extracted PromptMosaic folder, or open PowerShell in this folder
+    echo and execute:
+    echo   .\install_windows.bat
+)
+echo.
+if not defined PROMPTMOSAIC_NO_PAUSE pause
+exit /b %RESULT%
+
+:main
+echo PromptMosaic Windows installer
+echo.
+
+if not exist "requirements.txt" (
+    echo requirements.txt was not found.
+    echo.
+    echo This installer must be run from the full PromptMosaic folder.
+    echo Download the whole repository ZIP or clone the repository, extract it,
+    echo then run install_windows.bat inside that folder.
+    exit /b 2
+)
+
+if not exist "main.py" (
+    echo main.py was not found.
+    echo This does not look like the PromptMosaic application folder.
+    exit /b 2
+)
 
 rem Build a regular Python venv while ignoring any active Conda/Anaconda env.
 set "CONDA_PREFIX="
@@ -54,9 +93,4 @@ if errorlevel 1 exit /b 1
 ".venv\Scripts\python.exe" -m pip install -r requirements.txt
 if errorlevel 1 exit /b 1
 
-echo.
-echo Install complete.
-echo Start PromptMosaic with:
-echo   PromptMosaic.bat
-
-endlocal
+exit /b 0

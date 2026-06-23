@@ -32,6 +32,8 @@ It is intended to be used side by side with InvokeAI: keep the InvokeAI canvas o
 
 ## Quick Start
 
+First, download and extract the entire repository with **GitHub Code -> Download ZIP**, or clone the repository with `git clone`. Downloading only `install_windows.bat` is not enough.
+
 ```bat
 :: 1. Install dependencies (first run only)
 install_windows.bat
@@ -43,6 +45,8 @@ PromptMosaic.bat
 On first launch, the **InvokeAI Data Acquisition** wizard opens. Start InvokeAI 6.13 or later, then follow the wizard to fetch models, LoRAs, and generation templates from your current InvokeAI environment. See the [Tutorial](docs/TUTORIAL_EN.md) for details.
 
 PromptMosaic is designed for a regular Python virtual environment. It does not require Conda or Anaconda, and the launcher avoids using Conda DLL paths when they are present on the machine.
+
+You can double-click `install_windows.bat`. If installation fails, the console stays open and shows the reason before you press a key to close it.
 
 ---
 

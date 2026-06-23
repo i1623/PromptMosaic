@@ -56,13 +56,15 @@ The installer searches for Python 3.11, then 3.12, then 3.10, but the public ins
 
 ## 3. Install and Launch
 
-Open PowerShell or Command Prompt in the PromptMosaic folder and run:
+Download and extract the entire repository with **GitHub Code -> Download ZIP**, or clone it with `git clone`. Saving only `install_windows.bat` is not enough because the installer needs the other PromptMosaic files.
+
+Open PowerShell or Command Prompt in the extracted PromptMosaic folder and run:
 
 ```bat
 install_windows.bat
 ```
 
-The installer creates `.venv` and installs the required packages.
+You can also double-click `install_windows.bat`. The installer creates `.venv` and installs the required packages. If it fails, the console stays open and shows the reason.
 
 > Screenshot placeholder: console after running `install_windows.bat`
 > `docs/images/install_console.png`
