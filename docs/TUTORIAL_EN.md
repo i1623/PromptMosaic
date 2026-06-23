@@ -127,8 +127,7 @@ Start InvokeAI 6.13 or later before running the first setup.
 
 On first launch, PromptMosaic opens the **InvokeAI Data Acquisition** wizard.
 
-> Screenshot placeholder: InvokeAI Data Acquisition wizard
-> `docs/images/invoke_setup.png`
+![InvokeAI Data Acquisition wizard](images/invoke_setup_starting.png)
 
 ### Step 1: Fetch Models and LoRAs
 
@@ -140,6 +139,10 @@ http://localhost:9090
 
 Then fetch the model and LoRA lists. PromptMosaic stores the list locally so the generation UI can choose models and plans.
 
+After models and LoRAs are fetched, rows for each base model appear. At first, template names are shown as not fetched.
+
+![Templates not fetched yet](images/invoke_setup_templates_empty.png)
+
 ### Step 2: Fetch Generation Templates for Each Base Model
 
 A generation template is the actual txt2img workflow graph saved from InvokeAI. PromptMosaic reuses the graph and only replaces known fields such as prompt, seed, steps, CFG, scheduler, model, and size.
@@ -150,7 +153,21 @@ For each base model you want to use:
 2. If you plan to use LoRA, include at least one LoRA in that generation. PromptMosaic uses the LoRA path in the workflow as a reusable route.
 3. In PromptMosaic, fetch and save the template from the wizard.
 
+![Template name dialog](images/invoke_setup_template_name.png)
+
+After one template is fetched, its name appears in the row. Fetch only the base models you plan to use.
+
+![One template fetched](images/invoke_setup_template_saved.png)
+
 If the current base model has no template, generation is disabled until a template is available.
+
+When the templates you need are listed, setup is complete for those base models. You can register multiple templates for different VAE, refiner, text encoder, or other settings.
+
+![Multiple templates fetched](images/invoke_setup_templates_complete.png)
+
+If you try to generate with a base model that has no template, PromptMosaic shows a message that the template is missing. Generate an image with that base model in InvokeAI, then fetch the template in this wizard.
+
+![Missing template message](images/invoke_setup_missing_template.png)
 
 ---
 

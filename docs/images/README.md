@@ -16,7 +16,12 @@
 | `install_progress.png` | install_windows.bat 実行中のコンソール | TUTORIAL |
 | `install_complete.png` | install_windows.bat 完了後のコンソール | TUTORIAL |
 | `main_window.png` | 起動直後のメイン画面全体 | TUTORIAL |
-| `invoke_setup.png` | InvokeAI データ取得ウィザード | TUTORIAL |
+| `invoke_setup_starting.png` | InvokeAI データ取得ウィザード起動直後 | TUTORIAL |
+| `invoke_setup_templates_empty.png` | モデル / LoRA 取得後、テンプレート未取得の状態 | TUTORIAL |
+| `invoke_setup_template_name.png` | テンプレート名入力ダイアログ | TUTORIAL |
+| `invoke_setup_template_saved.png` | 1つのテンプレートを取得した状態 | TUTORIAL |
+| `invoke_setup_templates_complete.png` | 複数テンプレート取得後の状態 | TUTORIAL |
+| `invoke_setup_missing_template.png` | テンプレート未取得時のメッセージ | TUTORIAL |
 | `three_panes.png` | 3 ペインに番号を振った注釈付き画面 | TUTORIAL |
 | `tiles.png` | タイルを並べた中央ペイン | TUTORIAL |
 | `generation_bar.png` | 生成バー（モデル・解像度・seed など） | TUTORIAL |

@@ -16,7 +16,12 @@ File names match the screenshot placeholder comments in each document.
 | `install_progress.png` | Console while install_windows.bat is running | TUTORIAL |
 | `install_complete.png` | Console after install_windows.bat completes | TUTORIAL |
 | `main_window.png` | Full main window immediately after launch | TUTORIAL |
-| `invoke_setup.png` | InvokeAI Data Acquisition wizard | TUTORIAL |
+| `invoke_setup_starting.png` | InvokeAI Data Acquisition wizard at startup | TUTORIAL |
+| `invoke_setup_templates_empty.png` | Template rows before templates are fetched | TUTORIAL |
+| `invoke_setup_template_name.png` | Template name dialog | TUTORIAL |
+| `invoke_setup_template_saved.png` | One fetched template in the wizard | TUTORIAL |
+| `invoke_setup_templates_complete.png` | Multiple fetched templates in the wizard | TUTORIAL |
+| `invoke_setup_missing_template.png` | Missing template message | TUTORIAL |
 | `three_panes.png` | Annotated three-pane main window | TUTORIAL |
 | `tiles.png` | Center pane with arranged tiles | TUTORIAL |
 | `generation_bar.png` | Generation bar with model, size, seed, and other controls | TUTORIAL |
