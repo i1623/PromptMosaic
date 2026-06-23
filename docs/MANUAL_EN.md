@@ -126,6 +126,8 @@ Common operations:
 - Remove a tile from the current prompt.
 - Save useful arrangements as a tile group.
 
+In the block input field, comma-separated text such as `masterpiece, 1girl, blue eyes:1.2` creates multiple tag tiles. **Add Text** keeps the input as one natural text tile instead of splitting it.
+
 Disabled tiles remain visible but are not sent to InvokeAI.
 
 ### Translation
