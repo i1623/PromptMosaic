@@ -15,7 +15,7 @@ It is intended to be used side by side with InvokeAI: keep the InvokeAI canvas o
 - **11 languages** - Japanese, English, Chinese (Simplified / Traditional), Korean, German, French, Spanish, Italian, Portuguese (Brazil), and Russian.
 - **Simple data backup** - back up PromptMosaic by copying the entire `data` folder.
 
-> **Version:** 1.4.1
+> **Version:** 1.4.2
 > **Target InvokeAI:** 6.13 or later
 > **Supported OS:** Windows 11 (PySide6 / Python 3.11 recommended)
 
@@ -61,6 +61,20 @@ On first launch, the **InvokeAI Data Acquisition** wizard opens. Start InvokeAI 
 PromptMosaic is designed for a regular Python virtual environment. It does not require Conda or Anaconda, and the launcher avoids using Conda DLL paths when they are present on the machine.
 
 If installation fails, the console stays open and shows the reason. Read the message, then press any key to close it.
+
+---
+
+## Update
+
+Prompts, history, fetched model information, and generation templates are stored in the `data` folder. When updating, **do not delete your old PromptMosaic folder**.
+
+1. Quit PromptMosaic.
+2. Download and extract the new ZIP.
+3. Copy the contents of the new folder into your existing PromptMosaic folder.
+4. If Windows asks, choose to replace files with the same names.
+5. Double-click `update_windows.bat` in your existing PromptMosaic folder.
+
+`update_windows.bat` first copies the `data` folder to `_update_backups`, then updates the required Python packages.
 
 ---
 

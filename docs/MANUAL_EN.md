@@ -5,7 +5,7 @@
 This document is a feature-by-feature reference for PromptMosaic.
 If you are using PromptMosaic for the first time, read the [Tutorial](TUTORIAL_EN.md) first.
 
-> Target version: **1.4.1** / Target InvokeAI: **6.13 or later**
+> Target version: **1.4.2** / Target InvokeAI: **6.13 or later**
 
 ---
 
@@ -345,6 +345,28 @@ Open settings with the gear button.
 ---
 
 ## Data Management
+
+### Update
+
+PromptMosaic user data is stored in the `data` folder. This includes fetched model information, generation templates, prompts, and history. During an update, keep this `data` folder and replace only the application files.
+
+If you use the ZIP version:
+
+1. Quit PromptMosaic.
+2. For safety, copy the current `data` folder somewhere else.
+3. Download and extract the new ZIP.
+4. Copy the contents of the new folder into your existing PromptMosaic folder.
+5. If Windows asks, choose to replace files with the same names.
+6. In the existing PromptMosaic folder, double-click `update_windows.bat`.
+
+`update_windows.bat` automatically copies the `data` folder to `_update_backups`, then updates the Python environment according to `requirements.txt`. Do not delete the old folder before copying the new files, or the `data` folder will be lost.
+
+If you installed with Git:
+
+```bat
+git pull
+update_windows.bat
+```
 
 ### Backup
 

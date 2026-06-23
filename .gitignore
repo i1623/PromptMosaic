@@ -1,5 +1,6 @@
 /data/
 /images/
+/_update_backups/
 .venv/
 __pycache__/
 **/__pycache__/
@@ -16,4 +17,3 @@ Thumbs.db
 *.log
 *_LICENSES.csv
 LICENSE_CHECK_ATTENTION.txt
-
