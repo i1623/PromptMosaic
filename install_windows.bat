@@ -41,27 +41,15 @@ if not exist "main.py" (
     exit /b 2
 )
 
+echo Removing Windows downloaded-file warnings when possible ...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "foreach ($p in @('install_windows.bat','PromptMosaic.bat','main.py','requirements.txt')) { if (Test-Path -LiteralPath $p) { Unblock-File -LiteralPath $p -ErrorAction SilentlyContinue } }" >nul 2>nul
+
 rem Build a regular Python venv while ignoring any active Conda/Anaconda env.
 set "CONDA_PREFIX="
 set "CONDA_DEFAULT_ENV="
 set "PYTHONHOME="
 set "PYTHONPATH="
 set "PATH=%SystemRoot%\System32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SystemRoot%\System32\WindowsPowerShell\v1.0;%LocalAppData%\Programs\Python\Launcher"
-
-set "PYLAUNCH="
-for %%V in (3.11 3.12 3.10) do (
-    if not defined PYLAUNCH (
-        py -%%V -c "import sys; p=sys.executable.lower(); raise SystemExit(0 if all(x not in p for x in ('conda','anaconda','miniconda')) else 1)" >nul 2>nul
-        if not errorlevel 1 set "PYLAUNCH=py -%%V"
-    )
-)
-
-if not defined PYLAUNCH (
-    echo Could not find a regular Python installation via the Windows Python Launcher.
-    echo Install Python 3.11 from https://www.python.org/downloads/windows/
-    echo Make sure "Install launcher for all users" is enabled, then run this file again.
-    exit /b 1
-)
 
 if exist ".venv\pyvenv.cfg" (
     findstr /i "conda anaconda miniconda" ".venv\pyvenv.cfg" >nul
@@ -74,6 +62,21 @@ if exist ".venv\pyvenv.cfg" (
 )
 
 if not exist ".venv\Scripts\python.exe" (
+    set "PYLAUNCH="
+    for %%V in (3.11 3.12 3.10) do (
+        if not defined PYLAUNCH (
+            py -%%V -c "import sys; p=sys.executable.lower(); raise SystemExit(0 if all(x not in p for x in ('conda','anaconda','miniconda')) else 1)" >nul 2>nul
+            if not errorlevel 1 set "PYLAUNCH=py -%%V"
+        )
+    )
+
+    if not defined PYLAUNCH (
+        echo Could not find a regular Python installation via the Windows Python Launcher.
+        echo Install Python 3.11 from https://www.python.org/downloads/windows/
+        echo Make sure "Install launcher for all users" is enabled, then run this file again.
+        exit /b 1
+    )
+
     echo Creating .venv with %PYLAUNCH% ...
     %PYLAUNCH% -m venv .venv
     if errorlevel 1 exit /b 1

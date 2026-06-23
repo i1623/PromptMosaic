@@ -91,6 +91,8 @@ Confirm that the file name points to `install_windows.bat` inside the extracted 
 
 ![Windows batch file security warning](images/windows_batch_security_warning.png)
 
+The installer also tries to remove the same downloaded-file warning from the launcher `PromptMosaic.bat`. If the warning still appears when launching PromptMosaic, confirm that the file name is `PromptMosaic.bat`, then click **Run**.
+
 ```bat
 install_windows.bat
 ```

@@ -89,6 +89,8 @@ Windows が「発行元を確認できませんでした。このソフトウェ
 
 ![Windows のバッチファイル実行確認](images/windows_batch_security_warning.png)
 
+インストーラは、起動用の `PromptMosaic.bat` からも同じ警告が出にくくなるように、Windows の「ダウンロードしたファイル」扱いを解除します。もし起動時にも同じ警告が出た場合は、ファイル名が `PromptMosaic.bat` であることを確認して **実行** を押してください。
+
 ```bat
 :: 初回のみ: 仮想環境(.venv)を作成し依存パッケージを導入
 install_windows.bat
