@@ -5,7 +5,7 @@
 This document is a feature-by-feature reference for PromptMosaic.
 If you are using PromptMosaic for the first time, read the [Tutorial](TUTORIAL_EN.md) first.
 
-> Target version: **1.4.0** / Target InvokeAI: **6.13 or later**
+> Target version: **1.4.1** / Target InvokeAI: **6.13 or later**
 
 ---
 

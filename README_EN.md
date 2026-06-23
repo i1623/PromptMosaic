@@ -15,7 +15,7 @@ It is intended to be used side by side with InvokeAI: keep the InvokeAI canvas o
 - **11 languages** - Japanese, English, Chinese (Simplified / Traditional), Korean, German, French, Spanish, Italian, Portuguese (Brazil), and Russian.
 - **Simple data backup** - back up PromptMosaic by copying the entire `data` folder.
 
-> **Version:** 1.4.0
+> **Version:** 1.4.1
 > **Target InvokeAI:** 6.13 or later
 > **Supported OS:** Windows 11 (PySide6 / Python 3.11 recommended)
 

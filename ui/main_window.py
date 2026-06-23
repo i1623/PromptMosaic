@@ -1557,7 +1557,11 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "_model_base_combo"):
             return
         current_data = self._model_base_combo.currentData() if hasattr(self, "_model_base_combo") else None
-        keep_plan = current_data == "__plan__"
+        had_base_options = any(
+            self._model_base_combo.itemData(i) != "__plan__"
+            for i in range(self._model_base_combo.count())
+        )
+        keep_plan = current_data == "__plan__" and had_base_options
         current = self._current_base or ""
         rows = _env_db.fetchall(
             "SELECT DISTINCT base FROM models "
@@ -3403,7 +3407,9 @@ class MainWindow(QMainWindow):
     def _on_invoke_setup_changed(self) -> None:
         self._model_browser.refresh()
         self._lora_browser.refresh()
+        self._populate_base_plan_combo()
         self._populate_model_combo()
+        self._apply_model_mode_ui()
         self._update_generation_buttons()
 
     def _on_invoke_setup_language_changed(self) -> None:
