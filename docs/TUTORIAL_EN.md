@@ -202,6 +202,6 @@ After the first successful generation, try:
 - Creating a multi-model plan.
 - Fetching templates for additional base models.
 - Enabling LM Studio integration for translation or automatic classification.
-- Creating encrypted backups with `.pmbak`.
+- Backing up your work by copying the entire `data` folder.
 
 For complete details, continue with the [Manual](MANUAL_EN.md).

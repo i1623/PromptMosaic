@@ -334,7 +334,7 @@ Open settings with the gear button.
 
 ### Data Management
 
-- Backup / restore.
+- Backup guidance.
 - Export / import tag data.
 - Rebuild caches.
 
@@ -342,15 +342,15 @@ Open settings with the gear button.
 
 ## Data Management
 
-### Backup / Restore
+### Backup
 
-PromptMosaic can create encrypted backups of databases and history thumbnails.
+PromptMosaic backup is handled by copying the entire `data` folder.
 
-- **Backup** - creates `backup_YYYYMMDD_HHMMSS.pmbak` in the selected folder.
-- **Restore** - fully replaces the current database state with the backup contents. Image files copied from InvokeAI are not included.
-- **Undo last restore** - returns to the state just before the previous restore.
+- **Backup** - quit PromptMosaic, then copy the entire `data` folder to another location.
+- **Restore** - quit PromptMosaic, then put the copied `data` folder back in place.
+- `index.db` and `suggestions.db` are caches and will be rebuilt automatically on startup if missing.
 
-Saving the password on this PC is a convenience option. It is not a way to hide data from someone who can use the PC.
+> If you keep generated image files in another folder, copy that image folder separately when needed.
 
 ### Tag Data Export / Import
 
@@ -366,9 +366,9 @@ Tags and groups can be exported and imported as JSON / CSV.
 - **Rebuild suggestions** - rebuild `suggestions.db` from libraries.
 - `index.db` and `suggestions.db` are caches. Deleting or rebuilding them does not remove source data.
 
-### Manual Backup
+### Backup Basics
 
-Copying the entire `data` folder is also a simple manual backup. Restore it by putting the copied `data` folder back in place.
+Copying database files while the app is running can create an incomplete backup. Quit PromptMosaic before backup or restore.
 
 ---
 

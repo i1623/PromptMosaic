@@ -5,7 +5,7 @@
   - 表示 (Appearance): 言語 / テーマ / フォントサイズ / タイル表示 / NSFW / アイコン
   - 接続 (Connection): InvokeAI URL / キューID
   - 生成管理 (Generation): InvokeAIテンプレート管理 / マルチモデルプラン
-  - データ (Data): バックアップ / リストア
+  - データ (Data): バックアップ案内 / キャッシュ管理
 
 保存時: app_settings テーブルへ INSERT OR REPLACE で書き込む。
 URL / キューID は client にも即時反映する。
@@ -749,7 +749,7 @@ class SettingsDialog(QDialog):
     # ── データ管理タブ ──────────────────────────────────
 
     def _build_data_tab(self) -> QWidget:
-        """タグデータと全体バックアップ/リストアを行うタブ。"""
+        """タグデータ、バックアップ案内、キャッシュ管理を行うタブ。"""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)

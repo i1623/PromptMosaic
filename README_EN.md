@@ -12,7 +12,7 @@ It lets you build prompts as tiles, follow generation lineage in a history tree,
 - **Generation lineage / parallel-world history map** - visualize which generations branched from which results and jump back to any past point.
 - **Multi-model plans** - cycle through multiple models, LoRAs, and generation parameters in one generation run.
 - **11 languages** - Japanese, English, Chinese (Simplified / Traditional), Korean, German, French, Spanish, Italian, Portuguese (Brazil), and Russian.
-- **Encrypted backups** - protect prompts, history, and thumbnails together in `.pmbak` files.
+- **Simple data backup** - back up PromptMosaic by copying the entire `data` folder.
 
 > **Version:** 1.4.0
 > **Target InvokeAI:** 6.13 or later
