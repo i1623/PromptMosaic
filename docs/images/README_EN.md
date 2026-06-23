@@ -8,6 +8,9 @@ File names match the screenshot placeholder comments in each document.
 | File name | Contents | Referenced by |
 | --- | --- | --- |
 | `hero.jpg` | Hero image showing InvokeAI and PromptMosaic side by side | README |
+| `github_download_zip.png` | GitHub Code -> Download ZIP menu | TUTORIAL |
+| `windows_extract_zip.png` | Windows Extract All screen | TUTORIAL |
+| `install_files.png` | Extracted folder showing install_windows.bat and PromptMosaic.bat | TUTORIAL |
 | `main_window.png` | Full main window immediately after launch | TUTORIAL |
 | `install_console.png` | Console after running `install_windows.bat` | TUTORIAL |
 | `invoke_setup.png` | InvokeAI Data Acquisition wizard | TUTORIAL |

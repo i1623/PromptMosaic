@@ -32,13 +32,25 @@ It is intended to be used side by side with InvokeAI: keep the InvokeAI canvas o
 
 ## Quick Start
 
-First, download and extract the entire repository with **GitHub Code -> Download ZIP**, or clone the repository with `git clone`. Downloading only `install_windows.bat` is not enough.
+### 1. Download all files
+
+On this GitHub page, click the green **Code** button, then choose **Download ZIP**. After the ZIP file downloads, right-click it and choose **Extract All**. Open the extracted PromptMosaic folder.
+
+> Downloading only `install_windows.bat` will not work. Use the whole extracted PromptMosaic folder.
+
+### 2. Install
+
+Double-click `install_windows.bat` inside the extracted folder. A black console window opens and installs the required files.
+
+### 3. Launch
+
+After installation finishes, double-click `PromptMosaic.bat` in the same folder.
 
 ```bat
-:: 1. Install dependencies (first run only)
+:: First run only
 install_windows.bat
 
-:: 2. Launch PromptMosaic
+:: Later launches
 PromptMosaic.bat
 ```
 
@@ -46,7 +58,7 @@ On first launch, the **InvokeAI Data Acquisition** wizard opens. Start InvokeAI 
 
 PromptMosaic is designed for a regular Python virtual environment. It does not require Conda or Anaconda, and the launcher avoids using Conda DLL paths when they are present on the machine.
 
-You can double-click `install_windows.bat`. If installation fails, the console stays open and shows the reason before you press a key to close it.
+If installation fails, the console stays open and shows the reason. Read the message, then press any key to close it.
 
 ---
 

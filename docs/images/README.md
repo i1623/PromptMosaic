@@ -8,6 +8,9 @@
 | ファイル名 | 内容 | 参照元 |
 | --- | --- | --- |
 | `hero.jpg` | InvokeAI と PromptMosaic を分割表示した代表画像（ヒーロー画像） | README |
+| `github_download_zip.png` | GitHub の Code → Download ZIP メニュー | TUTORIAL |
+| `windows_extract_zip.png` | Windows の「すべて展開」画面 | TUTORIAL |
+| `install_files.png` | 展開後フォルダ内の install_windows.bat と PromptMosaic.bat | TUTORIAL |
 | `main_window.png` | 起動直後のメイン画面全体 | TUTORIAL |
 | `install_console.png` | install_windows.bat 実行後のコンソール | TUTORIAL |
 | `invoke_setup.png` | InvokeAI データ取得ウィザード | TUTORIAL |

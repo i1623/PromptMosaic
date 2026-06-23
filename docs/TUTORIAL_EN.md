@@ -56,26 +56,52 @@ The installer searches for Python 3.11, then 3.12, then 3.10, but the public ins
 
 ## 3. Install and Launch
 
-Download and extract the entire repository with **GitHub Code -> Download ZIP**, or clone it with `git clone`. Saving only `install_windows.bat` is not enough because the installer needs the other PromptMosaic files.
+This section is written for people who have never used GitHub before.
 
-Open PowerShell or Command Prompt in the extracted PromptMosaic folder and run:
+### 3-1. Download PromptMosaic
+
+1. Open the PromptMosaic GitHub page.
+2. Click the green **Code** button near the upper-right area of the page.
+3. Click **Download ZIP** in the menu.
+4. A ZIP file such as `PromptMosaic-main.zip` downloads.
+5. Right-click the downloaded ZIP file and choose **Extract All**.
+6. Extract it somewhere easy to find, such as your Documents folder or `D:\tools`.
+
+> Screenshot placeholder: GitHub Code -> Download ZIP menu
+> `docs/images/github_download_zip.png`
+
+> Screenshot placeholder: Windows Extract All screen
+> `docs/images/windows_extract_zip.png`
+
+> Downloading only `install_windows.bat` will not work. PromptMosaic needs many files together, including `main.py`, `requirements.txt`, and the `ui` folder. Always extract the whole ZIP file.
+
+### 3-2. Install
+
+Open the extracted folder. Double-click `install_windows.bat`.
+
+> Screenshot placeholder: extracted folder showing `install_windows.bat` and `PromptMosaic.bat`
+> `docs/images/install_files.png`
 
 ```bat
 install_windows.bat
 ```
 
-You can also double-click `install_windows.bat`. The installer creates `.venv` and installs the required packages. If it fails, the console stays open and shows the reason.
+A black console window opens and installation runs automatically. When it succeeds, a `.venv` folder is created and the message `Install complete.` appears.
+
+If installation fails, the console does not close immediately. Read the message, then press any key to close it.
+
+### 3-3. Launch
+
+After installation finishes, double-click `PromptMosaic.bat` in the same folder.
 
 > Screenshot placeholder: console after running `install_windows.bat`
 > `docs/images/install_console.png`
-
-Then launch:
 
 ```bat
 PromptMosaic.bat
 ```
 
-If the virtual environment is missing, run `install_windows.bat` first.
+For later launches, use `PromptMosaic.bat`, not `install_windows.bat`.
 
 ---
 
