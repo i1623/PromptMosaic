@@ -8,7 +8,7 @@
 It is intended to be used side by side with InvokeAI: keep the InvokeAI viewer open on one side, and edit prompts, history, and regeneration flow in PromptMosaic on the other. It is designed around editing English prompts while showing local-language labels, such as Japanese, side by side. If you configure a local LLM such as LM Studio for translation, PromptMosaic can turn words or sentences in your language into English prompt tiles. Image generation itself is performed by InvokeAI.
 
 - **Side-by-side InvokeAI workflow** - keep InvokeAI's viewer visible while using PromptMosaic for prompt editing, history management, and regeneration.
-- **Bilingual tile editing** - view English prompt text and local-language labels side by side while arranging, emphasizing, enabling, and disabling words or sentences as tiles.
+- **Bilingual tile editing** - view English prompt text and local-language labels side by side while arranging words or sentences as tiles with drag-and-drop, emphasis, and ON/OFF toggles.
 - **Translation assistance** - use a local LLM such as LM Studio to convert words or sentences into English prompt tiles.
 - **Generation lineage / parallel-world history map** - visualize which generations branched from which results and jump back to any past point.
 - **Multi-model plans** - cycle through multiple models, LoRAs, and generation parameters in one generation run.
