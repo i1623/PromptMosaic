@@ -7,7 +7,7 @@ File names match the screenshot placeholder comments in each document.
 
 | File name | Contents | Referenced by |
 | --- | --- | --- |
-| `hero.png` | Hero image, prepared by the user | README |
+| `hero.png` | Hero image showing InvokeAI and PromptMosaic side by side | README |
 | `main_window.png` | Full main window immediately after launch | TUTORIAL |
 | `install_console.png` | Console after running `install_windows.bat` | TUTORIAL |
 | `invoke_setup.png` | InvokeAI Data Acquisition wizard | TUTORIAL |
@@ -21,5 +21,4 @@ File names match the screenshot placeholder comments in each document.
 | `history_map_full.png` | Full history map | MANUAL |
 | `plan_dialog.png` | Multi-model plan editor dialog | MANUAL |
 
-> The documents remain readable even when images are not yet present.
-> After adding images, enable or add Markdown image lines where needed. The hero image line in README.md is currently commented out.
+> Screenshots other than the hero image are still represented by placeholders so the documents remain readable before they are added.

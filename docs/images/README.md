@@ -7,7 +7,7 @@
 
 | ファイル名 | 内容 | 参照元 |
 | --- | --- | --- |
-| `hero.png` | 代表画像（ヒーロー画像）※ユーザーが作成 | README |
+| `hero.png` | InvokeAI と PromptMosaic を分割表示した代表画像（ヒーロー画像） | README |
 | `main_window.png` | 起動直後のメイン画面全体 | TUTORIAL |
 | `install_console.png` | install_windows.bat 実行後のコンソール | TUTORIAL |
 | `invoke_setup.png` | InvokeAI データ取得ウィザード | TUTORIAL |
@@ -21,5 +21,4 @@
 | `history_map_full.png` | 履歴マップ全体 | MANUAL |
 | `plan_dialog.png` | マルチモデルプラン編集ダイアログ | MANUAL |
 
-> 画像が未配置でもドキュメントは読めます（該当箇所はコメントとして残してあります）。
-> 画像を配置したら、必要な箇所で Markdown の画像行を有効化または追加してください。README.md のヒーロー画像行は現在コメントアウトしています。
+> ヒーロー画像以外のスクリーンショットは、未配置でもドキュメントを読めるように差し込み位置だけを残しています。
