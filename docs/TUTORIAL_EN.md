@@ -85,6 +85,12 @@ Open the extracted folder. Double-click `install_windows.bat`.
 
 ![Extracted folder showing install_windows.bat and PromptMosaic.bat](images/install_files.png)
 
+Windows may show a warning that says it cannot verify the publisher and asks whether you want to run the software. This is a standard Windows confirmation for unsigned personal batch files.
+
+Confirm that the file name points to `install_windows.bat` inside the extracted PromptMosaic folder, then click **Run**.
+
+![Windows batch file security warning](images/windows_batch_security_warning.png)
+
 ```bat
 install_windows.bat
 ```

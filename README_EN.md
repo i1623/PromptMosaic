@@ -42,6 +42,8 @@ On this GitHub page, click the green **Code** button, then choose **Download ZIP
 
 Double-click `install_windows.bat` inside the extracted folder. A black console window opens and installs the required files.
 
+If Windows says it cannot verify the publisher, confirm that the file is `install_windows.bat` inside the PromptMosaic folder, then click **Run**. See the [Tutorial](docs/TUTORIAL_EN.md) for details.
+
 ### 3. Launch
 
 After installation finishes, double-click `PromptMosaic.bat` in the same folder.
