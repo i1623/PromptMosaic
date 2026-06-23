@@ -108,21 +108,3 @@ This application would not exist without the long-running work of the InvokeAI d
 - **[LM Studio](https://lmstudio.ai/)** - optional local LLM server for prompt translation and automatic classification.
 
 > When redistributing, follow the license terms of each dependency. Pay special attention to the LGPL/GPL terms for PySide6 / shiboken6.
-
----
-
-## Do Not Include in Public Packages
-
-Do not include private developer data when publishing or redistributing PromptMosaic.
-
-```text
-.venv/                     Virtual environment
-__pycache__/               Python caches
-data/*.db / *.db-wal/-shm  Personal settings, prompts, history, and NSFW flags
-data/template_cache*.json  Workflow graphs specific to an InvokeAI environment
-data/thumbnails/           History thumbnails
-data/model_thumbnails/     Model thumbnails
-images/                    Local copies of generated images
-```
-
-Release packages should start with a clean state so PromptMosaic can create fresh databases on first launch.
