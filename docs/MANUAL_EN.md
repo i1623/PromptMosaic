@@ -33,6 +33,8 @@ If you are using PromptMosaic for the first time, read the [Tutorial](TUTORIAL_E
 | --- | --- |
 | Prompt | The text sent to InvokeAI for image generation |
 | Tile | A reusable prompt piece such as a tag, word, or sentence |
+| Bilingual display | A core PromptMosaic workflow: show English prompt text and local-language labels side by side |
+| Translation assistance | Optional local LLM integration, such as LM Studio, for turning words or sentences in your language into English prompt tiles |
 | Tag | A structured prompt word stored in the tag browser |
 | Tile group | A reusable group of tiles |
 | Prompt text | A longer sentence or paragraph stored for reuse |
@@ -41,7 +43,7 @@ If you are using PromptMosaic for the first time, read the [Tutorial](TUTORIAL_E
 | Generation template | An InvokeAI txt2img workflow graph saved as the base for future jobs |
 | Multi-model plan | A sequence of models, LoRAs, and parameters used for repeated generation |
 
-PromptMosaic is built around reusable prompt parts and visible generation lineage. The goal is to make experimentation repeatable instead of losing useful prompt states.
+PromptMosaic is built around bilingual prompt editing, reusable prompt parts, and visible generation lineage. The goal is to make experimentation repeatable without losing either the English prompt text or the local-language meaning.
 
 ---
 

@@ -27,9 +27,11 @@ For detailed feature descriptions, see the [Manual](MANUAL_EN.md).
 
 ## 1. What PromptMosaic Is
 
-PromptMosaic is a companion GUI for InvokeAI.
+PromptMosaic is a companion GUI for InvokeAI. It was built around editing English prompts while showing local-language labels, such as Japanese translations, side by side.
 
 - Manage prompts as reusable **tiles**.
+- View English prompt text and local-language labels together.
+- Use a translation LLM such as LM Studio to turn words or sentences in your language into English prompt tiles.
 - Organize tags, prompt text, and tile groups.
 - Send generation jobs to InvokeAI.
 - Review generation history and branch from past results.
