@@ -81,7 +81,7 @@ PromptMosaic is built on many excellent open-source projects. Deep thanks to the
 
 PromptMosaic does not generate images by itself. All actual image generation is handled by **[InvokeAI](https://github.com/invoke-ai/InvokeAI)**, developed by [Invoke](https://www.invoke.com/) and the InvokeAI community. PromptMosaic fetches InvokeAI txt2img workflow graphs as **generation templates**, replaces only the prompt, seed, and known parameter fields, and submits the result to the InvokeAI queue.
 
-This application would not exist without the long-running work of the InvokeAI developers and contributors. Prompt weighting syntax follows the **[Compel](https://github.com/damian0815/compel)** style used by InvokeAI.
+This application would not exist without the long-running work of the InvokeAI developers and contributors. Tile emphasis supports a subset of InvokeAI / Compel-style `+` / `-` and numeric weights, but PromptMosaic does not implement or guarantee the full Compel syntax.
 
 ### UI Framework and Color Theme
 
