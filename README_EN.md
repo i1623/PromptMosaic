@@ -57,7 +57,7 @@ PromptMosaic is released under the **[MIT License](LICENSE)**.
 Copyright (c) 2026 i1623
 ```
 
-> Third-party projects and libraries used with PromptMosaic, including InvokeAI, Qt, and Python packages, are governed by their own licenses. When redistributing, review the license terms for the dependencies listed in `requirements.txt`. Qt (PySide6) is especially subject to LGPL/GPL/commercial licensing terms.
+> Third-party projects and libraries used with PromptMosaic, including InvokeAI, Qt, and Python packages, are governed by their own licenses. When redistributing, review the license terms for the dependencies listed in `requirements.txt`. The PySide6 / shiboken6 wheels are distributed as `LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only`.
 
 ---
 
@@ -75,7 +75,7 @@ This application would not exist without the long-running work of the InvokeAI d
 
 | Project | Purpose | Author / Provider |
 | --- | --- | --- |
-| **[Qt for Python (PySide6 / shiboken6)](https://www.qt.io/qt-for-python)** | GUI framework | The Qt Company |
+| **[Qt for Python (PySide6 / shiboken6)](https://www.qt.io/qt-for-python)** | GUI framework | The Qt Company (LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only) |
 | **[Catppuccin](https://github.com/catppuccin/catppuccin)** | Theme colors (Mocha / Latte) | Catppuccin org |
 
 ### Python Libraries
@@ -95,7 +95,7 @@ This application would not exist without the long-running work of the InvokeAI d
 
 - **[LM Studio](https://lmstudio.ai/)** - optional local LLM server for prompt translation and automatic classification.
 
-> When redistributing, follow the license terms of each dependency. Pay special attention to Qt licensing terms.
+> When redistributing, follow the license terms of each dependency. Pay special attention to the LGPL/GPL terms for PySide6 / shiboken6.
 
 ---
 
