@@ -61,6 +61,18 @@ Copyright (c) 2026 i1623
 
 ---
 
+## Development Policy and Support Scope
+
+PromptMosaic is a personal project. Its main goal is to keep working in the author's own InvokeAI creative workflow, especially by tracking important InvokeAI changes.
+
+Bug reports and suggestions are welcome, but continuous individual support and implementation of every request are not guaranteed. Feature work is prioritized when it is needed for the author's own workflow or for maintaining InvokeAI compatibility.
+
+PromptMosaic was developed through AI-assisted "vibe coding" using Claude Code and OpenAI Codex. Direction, specification decisions, review, testing, and release decisions are handled by i1623.
+
+Documentation and UI translations are also created with AI assistance. They are reviewed, but mistranslations or awkward wording may remain. Gentle correction reports are appreciated.
+
+---
+
 ## Acknowledgments
 
 PromptMosaic is built on many excellent open-source projects. Deep thanks to their authors and communities.
