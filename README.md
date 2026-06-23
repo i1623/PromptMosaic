@@ -1,4 +1,4 @@
-![PromptMosaic and InvokeAI side by side](docs/images/hero.png)
+![PromptMosaic and InvokeAI side by side](docs/images/hero.jpg)
 
 # PromptMosaic
 

@@ -7,7 +7,7 @@ File names match the screenshot placeholder comments in each document.
 
 | File name | Contents | Referenced by |
 | --- | --- | --- |
-| `hero.png` | Hero image showing InvokeAI and PromptMosaic side by side | README |
+| `hero.jpg` | Hero image showing InvokeAI and PromptMosaic side by side | README |
 | `main_window.png` | Full main window immediately after launch | TUTORIAL |
 | `install_console.png` | Console after running `install_windows.bat` | TUTORIAL |
 | `invoke_setup.png` | InvokeAI Data Acquisition wizard | TUTORIAL |

@@ -7,7 +7,7 @@
 
 | ファイル名 | 内容 | 参照元 |
 | --- | --- | --- |
-| `hero.png` | InvokeAI と PromptMosaic を分割表示した代表画像（ヒーロー画像） | README |
+| `hero.jpg` | InvokeAI と PromptMosaic を分割表示した代表画像（ヒーロー画像） | README |
 | `main_window.png` | 起動直後のメイン画面全体 | TUTORIAL |
 | `install_console.png` | install_windows.bat 実行後のコンソール | TUTORIAL |
 | `invoke_setup.png` | InvokeAI データ取得ウィザード | TUTORIAL |
