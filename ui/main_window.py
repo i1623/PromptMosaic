@@ -5045,6 +5045,26 @@ class MainWindow(QMainWindow):
         self._history_map_dialog.rebuild(nodes, current, self._history_map_opened_node)
         self._refresh_lineage_two_row_view()
 
+    def _update_history_maps_current_node_fast(self, current: tuple[str, int]) -> bool:
+        """履歴マップの現在地表示だけを差分更新する。
+
+        マップクリックによる現在地移動では、ノード構造・線・サムネイルは変わらない。
+        そのため全 rebuild を避け、旧現在地と新現在地のノード表示だけ差し替える。
+        表示中マップに対象ノードが無い場合は False を返し、呼び出し元が rebuild へ戻す。
+        """
+        opened = self._history_map_opened_node
+        updated_any = False
+        for host in (self._history_map_dialog, getattr(self._editor, "parent_child_map", None)):
+            if host is None or not hasattr(host, "update_current_node"):
+                continue
+            try:
+                if not host.update_current_node(current, opened):
+                    return False
+                updated_any = True
+            except RuntimeError:
+                return False
+        return updated_any
+
     def _history_image_viewer_is_open(self) -> bool:
         """画像ビューア（拡大マップ/中央マップのどちらが持っていても）が表示中か。"""
         hosts = (self._history_map_dialog, getattr(self._editor, "parent_child_map", None))
@@ -5201,7 +5221,9 @@ class MainWindow(QMainWindow):
         if set_focus:
             self._history_map_dialog_focus = node_key
             self._history_map_opened_node = node_key
-            self._refresh_history_map_dialog()
+            current = self._current_editor_history_node()
+            if current is None or not self._update_history_maps_current_node_fast(current):
+                self._refresh_history_map_dialog()
 
         row = None
         if history_db_path(history_db).exists():
@@ -5325,8 +5347,14 @@ class MainWindow(QMainWindow):
                 self._seed_spin.setValue(max(0, min(2_147_483_647, seed)))
             self._set_current_editor_history_node(history_db, gen_id)
             self._history_map_dialog_focus = (history_db, gen_id)
-            # ジャンプしてもマップは閉じない（連続ジャンプを許す）
-            self._refresh_history_map_dialog()
+            if from_map:
+                # マップクリックはノード構造を変えず、現在地だけが移動する。
+                # 全 rebuild はノード数に比例して重いので、既存ノードの表示だけ差し替える。
+                if not self._update_history_maps_current_node_fast((history_db, gen_id)):
+                    self._refresh_history_map_dialog()
+            else:
+                # ジャンプしてもマップは閉じない（連続ジャンプを許す）
+                self._refresh_history_map_dialog()
             # 現在地へのスクロール追従（操作したマップ自身は動かさない）。
             self._follow_current_in_maps(source)
             if from_map:

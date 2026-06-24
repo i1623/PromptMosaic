@@ -218,6 +218,7 @@ class _NodeItem(QGraphicsRectItem):
         self._selected = False
         self._is_drop_target = False
         self._hovered = False
+        self._current_marker: QGraphicsSimpleTextItem | None = None
         self.setAcceptHoverEvents(True)
         self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
@@ -273,16 +274,7 @@ class _NodeItem(QGraphicsRectItem):
             92 + (14 - stars_rect.height()) / 2,
         )
 
-        # 現在地マーカー（▼）: ノード上端の真上に表示
-        if is_current:
-            marker = QGraphicsSimpleTextItem("▼", self)
-            marker.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
-            marker.setBrush(QBrush(QColor(ACCENT)))
-            mfont = marker.font()
-            mfont.setPointSize(mfont.pointSize() + 2)
-            marker.setFont(mfont)
-            mrect = marker.boundingRect()
-            marker.setPos((self.rect().width() - mrect.width()) / 2, -mrect.height() - 2)
+        self._sync_current_marker()
 
         self._apply_visual(False)
 
@@ -320,6 +312,54 @@ class _NodeItem(QGraphicsRectItem):
         if self._is_drop_target != enabled:
             self._is_drop_target = enabled
             self._apply_visual(False)
+
+    def set_current_node(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if self._is_current == enabled:
+            return
+        self._is_current = enabled
+        self._sync_tooltip()
+        self._sync_current_marker()
+        self._apply_visual(self._hovered)
+
+    def set_opened_target(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if self._is_opened_target == enabled:
+            return
+        self._is_opened_target = enabled
+        self._apply_visual(self._hovered)
+
+    def _sync_tooltip(self) -> None:
+        if self._is_removed:
+            self.setToolTip(tr("history_map.target_removed"))
+        elif self._is_current:
+            self.setToolTip(tr("history_map.current_node"))
+        else:
+            self.setToolTip(tr("history_map.jump_tooltip"))
+
+    def _sync_current_marker(self) -> None:
+        if not self._is_current:
+            marker = self._current_marker
+            if marker is not None:
+                try:
+                    scene = marker.scene()
+                    if scene is not None:
+                        scene.removeItem(marker)
+                except RuntimeError:
+                    pass
+            self._current_marker = None
+            return
+        if self._current_marker is None:
+            marker = QGraphicsSimpleTextItem("▼", self)
+            marker.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+            marker.setBrush(QBrush(QColor(ACCENT)))
+            mfont = marker.font()
+            mfont.setPointSize(mfont.pointSize() + 2)
+            marker.setFont(mfont)
+            self._current_marker = marker
+        marker = self._current_marker
+        mrect = marker.boundingRect()
+        marker.setPos((self.rect().width() - mrect.width()) / 2, -mrect.height() - 2)
 
     def _view_is_panning(self) -> bool:
         """このシーンを表示しているビューがパン中かどうか。"""
@@ -1793,6 +1833,68 @@ class HistoryMapDialog(QDialog):
         # rebuild が走るが、その都度 current へスクロールするのは UX を損なう。
         # スクロールはマップを開いた時のみ（showEvent / scroll_to_current）。
 
+    def update_current_node(
+        self,
+        current_node: NodeKey | None,
+        opened_node: NodeKey | None = None,
+    ) -> bool:
+        """既存レイアウトを保ったまま、現在地/開いているノード表示だけを差し替える。
+
+        ノード追加・削除・親子関係変更・色変更など、レイアウトや全体状態が変わる場合は
+        rebuild() が必要。このメソッドは「現在地ポインタが移動しただけ」の高速経路。
+        """
+        items = getattr(self, "_items_by_key", {})
+        if current_node is not None and current_node not in items:
+            return False
+        if opened_node is not None and opened_node not in items:
+            opened_node = None
+
+        old_current = self._current_item
+        new_current = items.get(current_node) if current_node is not None else None
+        old_opened = self._opened_item
+        new_opened = (
+            items.get(opened_node)
+            if opened_node is not None and opened_node != current_node
+            else None
+        )
+
+        if old_current is not None and old_current is not new_current:
+            old_current.set_current_node(False)
+        if old_opened is not None and old_opened is not new_opened:
+            old_opened.set_opened_target(False)
+
+        self._current_item = new_current
+        self._opened_item = new_opened
+        self._view._current_node_key = current_node
+
+        if new_current is not None:
+            new_current.set_opened_target(False)
+            new_current.set_current_node(True)
+        if new_opened is not None:
+            new_opened.set_current_node(False)
+            new_opened.set_opened_target(True)
+
+        old_glow = self._current_glow
+        if old_glow is not None:
+            try:
+                scene = old_glow.scene()
+                if scene is not None:
+                    scene.removeItem(old_glow)
+            except RuntimeError:
+                pass
+        self._current_glow = (
+            _CurrentGlowItem(new_current.rect(), new_current)
+            if new_current is not None
+            else None
+        )
+        for item in (old_current, new_current, old_opened, new_opened):
+            if item is not None:
+                try:
+                    item.update()
+                except RuntimeError:
+                    pass
+        return True
+
     def set_view_restricted(self, restricted: bool) -> None:
         """「ここ以下のみ表示」中かどうか（コンテキストメニューの全体表示の有効化に使う）。"""
         self._view.set_view_restricted(restricted)
@@ -2211,6 +2313,13 @@ class HistoryMapPanel(QWidget):
             self._apply_desired_center()
         finally:
             self._restoring_view = prev_restoring
+
+    def update_current_node(
+        self,
+        current_node: NodeKey | None,
+        opened_node: NodeKey | None = None,
+    ) -> bool:
+        return HistoryMapDialog.update_current_node(self, current_node, opened_node)
 
     def set_view_restricted(self, restricted: bool) -> None:
         self._view.set_view_restricted(restricted)
