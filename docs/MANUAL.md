@@ -5,7 +5,7 @@
 このドキュメントは PromptMosaic の各機能を機能ごとに解説するリファレンスです。
 はじめて使う方は、先に [チュートリアル（TUTORIAL.md）](TUTORIAL.md) を読むことをおすすめします。
 
-> 対象バージョン: **1.4.4** / 対象 Invoke: **6.13 以降**
+> 対象バージョン: **1.4.5** / 対象 Invoke: **6.13 以降**
 
 ---
 
@@ -455,23 +455,14 @@
 
 PromptMosaic のユーザーデータは `data` フォルダに保存されます。取得済みモデル情報、生成テンプレート、プロンプト、履歴などもここに入ります。アップデート時は、この `data` フォルダを残したまま、アプリ本体だけを新しい版へ置き換えます。
 
-ZIP 版を使っている場合:
-
 1. PromptMosaic を終了します。
-2. 念のため、今使っている PromptMosaic フォルダの `data` フォルダを別の場所へコピーします。
-3. 新しい ZIP をダウンロードして展開します。
-4. 新しいフォルダの中身を、今まで使っていた PromptMosaic フォルダへコピーします。
-5. Windows に確認されたら、同名ファイルは **置き換える** を選びます。
-6. 今まで使っていた PromptMosaic フォルダで `update_windows.bat` をダブルクリックします。
+2. 今まで使っていた PromptMosaic フォルダを開きます。
+3. `update_windows.bat` をダブルクリックします。
+4. 黒い画面で `Update complete.` と表示されたら完了です。
 
-`update_windows.bat` は、更新前に `data` フォルダを `_update_backups` へ自動コピーし、その後 `requirements.txt` に合わせて Python 環境を更新します。古いフォルダを削除してから新しい ZIP を置くと、`data` も消えてしまうので避けてください。
+`update_windows.bat` は、更新前に `data` フォルダを `_update_backups` へ自動コピーします。Git で取得したフォルダでは `git pull` を実行し、ZIP 版では GitHub から最新版 ZIP を一時フォルダへダウンロードして本体ファイルを更新します。その後、`requirements.txt` に合わせて Python 環境を更新します。
 
-Git で取得している場合:
-
-```bat
-git pull
-update_windows.bat
-```
+古いフォルダを削除すると `data` も消えてしまうので、アップデートでは削除せず、今まで使っていたフォルダ内の `update_windows.bat` を実行してください。
 
 ### バックアップ
 

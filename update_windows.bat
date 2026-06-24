@@ -56,9 +56,42 @@ if exist "data" (
 )
 
 echo.
+call :update_app_files
+if errorlevel 1 exit /b 1
+
+echo.
 echo Updating Python environment ...
 set "PROMPTMOSAIC_NO_PAUSE=1"
 call install_windows.bat
 if errorlevel 1 exit /b 1
 
+exit /b 0
+
+:update_app_files
+if exist ".git" (
+    where git >nul 2>nul
+    if errorlevel 1 (
+        echo This folder looks like a Git checkout, but git.exe was not found.
+        echo Install Git for Windows, or update by downloading the ZIP manually.
+        exit /b 1
+    )
+    echo Updating application files with git pull ...
+    git pull --ff-only
+    if errorlevel 1 (
+        echo git pull failed.
+        echo If PromptMosaic files were edited manually, save them elsewhere and try again.
+        exit /b 1
+    )
+    exit /b 0
+)
+
+echo This folder is not a Git checkout.
+echo Downloading the latest PromptMosaic ZIP from GitHub ...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $root=(Resolve-Path -LiteralPath '.').Path; $tmp=Join-Path $env:TEMP ('PromptMosaic_update_' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path $tmp | Out-Null; try { $zip=Join-Path $tmp 'PromptMosaic-main.zip'; Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/i1623/PromptMosaic/archive/refs/heads/main.zip' -OutFile $zip; Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force; $src=Join-Path $tmp 'PromptMosaic-main'; if (!(Test-Path -LiteralPath $src)) { throw 'Extracted PromptMosaic-main folder was not found.' }; $skip=@('data','.venv','_update_backups','.git','update_windows.bat'); Get-ChildItem -LiteralPath $src -Force | Where-Object { $skip -notcontains $_.Name } | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $root -Recurse -Force }; } finally { if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue } }"
+if errorlevel 1 (
+    echo Download update failed.
+    echo Check your internet connection, or download the ZIP manually from GitHub.
+    exit /b 1
+)
+echo Application files updated.
 exit /b 0

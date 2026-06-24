@@ -16,7 +16,7 @@ Invoke と画面を分割して並べ、Invoke 側で生成結果を見ながら
 - 🌏 **11 言語対応** — 日本語・英語・中国語（簡体／繁体）・韓国語・ドイツ語・フランス語・スペイン語・イタリア語・ポルトガル語（ブラジル）・ロシア語
 - 💾 **シンプルなデータ保全** — `data` フォルダを丸ごとコピーしてバックアップ
 
-> **バージョン:** 1.4.4
+> **バージョン:** 1.4.5
 > **対象 Invoke:** 6.13 以降
 > **対応 OS:** Windows 11（PySide6 / Python 3.11 推奨）
 
@@ -68,12 +68,11 @@ PromptMosaic.bat
 PromptMosaic のプロンプト、履歴、取得済みモデル情報、生成テンプレートなどは `data` フォルダに保存されます。アップデートでは **古い PromptMosaic フォルダを削除しないでください**。
 
 1. PromptMosaic を終了します。
-2. 新しい ZIP をダウンロードして展開します。
-3. 新しいフォルダの中身を、今まで使っていた PromptMosaic フォルダへコピーします。
-4. Windows に確認されたら、同名ファイルは **置き換える** を選びます。
-5. 今まで使っていた PromptMosaic フォルダの `update_windows.bat` をダブルクリックします。
+2. 今まで使っていた PromptMosaic フォルダを開きます。
+3. `update_windows.bat` をダブルクリックします。
+4. 黒い画面で `Update complete.` と表示されたら完了です。
 
-`update_windows.bat` は、先に `data` フォルダを `_update_backups` にコピーしてから、必要な Python パッケージを更新します。
+`update_windows.bat` は、先に `data` フォルダを `_update_backups` にコピーしてから、Git 版では `git pull`、ZIP 版では GitHub から最新版 ZIP を自動取得して本体ファイルを更新します。その後、必要な Python パッケージも更新します。
 
 ---
 
