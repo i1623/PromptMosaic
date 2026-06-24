@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 from core.i18n import tr
 from ui.styles import (
     ACCENT, EMOJI_ICON_SS, RED, SURFACE0, SURFACE1, SURFACE2, TEXT, SUBTEXT,
-    themed_button_style,
+    themed_button_style, ui_font,
 )
 
 ZOOM_MIN = 0.2
@@ -259,30 +259,6 @@ class _NodeItem(QGraphicsRectItem):
             74 + (16 - label_rect.height()) / 2,
         )
 
-        self._hover_label_bg = QGraphicsRectItem(self)
-        self._hover_label_bg.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
-        self._hover_label_bg.setBrush(QBrush(QColor(SURFACE0)))
-        self._hover_label_bg.setPen(QPen(QColor(ACCENT), 1))
-        self._hover_label_bg.setZValue(20)
-        self._hover_label_bg.setVisible(False)
-        self._hover_label = QGraphicsSimpleTextItem(tr("history_map.node_label", n=node.history_id), self)
-        self._hover_label.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
-        hover_font = self._hover_label.font()
-        hover_font.setPointSize(hover_font.pointSize() + 2)
-        hover_font.setBold(True)
-        self._hover_label.setFont(hover_font)
-        self._hover_label.setBrush(QBrush(QColor(TEXT)))
-        self._hover_label.setZValue(21)
-        hover_rect = self._hover_label.boundingRect()
-        hover_bg_rect = QRectF(0, 0, hover_rect.width() + 12, hover_rect.height() + 6)
-        self._hover_label_bg.setRect(hover_bg_rect)
-        self._hover_label_bg.setPos((self.rect().width() - hover_bg_rect.width()) / 2, -hover_bg_rect.height() - 8)
-        self._hover_label.setPos(
-            self._hover_label_bg.pos().x() + 6,
-            self._hover_label_bg.pos().y() + 3,
-        )
-        self._hover_label.setVisible(False)
-
         # ★評価（未評価は薄い☆5つで揃える）
         rating = max(0, min(5, int(node.rating or 0)))
         self._stars = QGraphicsSimpleTextItem("★" * rating + "☆" * (5 - rating), self)
@@ -362,22 +338,30 @@ class _NodeItem(QGraphicsRectItem):
         # その古い位置にノードが差しかかると hoverEnter が発火してしまう（誤点灯）
         if not self._view_is_panning():
             self._apply_visual(True)
-            QTimer.singleShot(320, self._show_hover_label_if_still_hovered)
+            self._schedule_view_hover_badge()
         super().hoverEnterEvent(event)
 
     def hoverLeaveEvent(self, event) -> None:
         self._hovered = False
-        self._set_hover_label_visible(False)
+        self._hide_view_hover_badge()
         self._apply_visual(False)  # 消灯は常に安全
         super().hoverLeaveEvent(event)
 
-    def _show_hover_label_if_still_hovered(self) -> None:
-        if self._hovered and not self._view_is_panning():
-            self._set_hover_label_visible(True)
+    def _schedule_view_hover_badge(self) -> None:
+        scene = self.scene()
+        if scene is None:
+            return
+        for view in scene.views():
+            if hasattr(view, "schedule_hover_badge"):
+                view.schedule_hover_badge(self)
 
-    def _set_hover_label_visible(self, visible: bool) -> None:
-        self._hover_label_bg.setVisible(visible)
-        self._hover_label.setVisible(visible)
+    def _hide_view_hover_badge(self) -> None:
+        scene = self.scene()
+        if scene is None:
+            return
+        for view in scene.views():
+            if hasattr(view, "hide_hover_badge"):
+                view.hide_hover_badge(self)
 
     def _apply_visual(self, hovered: bool) -> None:
         if self._is_drop_target:
@@ -506,9 +490,70 @@ class _HistoryMapView(QGraphicsView):
         self._view_restricted = False  # 「ここ以下のみ表示」中か
         self._active_history = ""      # アクティブ履歴名（編集メニューの有効判定用）
         self._zoom = 1.0
+        self._hover_badge_item: _NodeItem | None = None
+        self._hover_badge_token = 0
+        self._hover_badge = QLabel(self.viewport())
+        self._hover_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._hover_badge.setFont(ui_font(delta=1, bold=True))
+        self._hover_badge.setStyleSheet(
+            f"QLabel {{ background: {SURFACE0}; color: {TEXT}; "
+            f"border: 1px solid {ACCENT}; border-radius: 4px; padding: 3px 7px; }}"
+        )
+        self._hover_badge.hide()
         # ズームはカーソル位置を中心に行う
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
+
+    def schedule_hover_badge(self, item: _NodeItem) -> None:
+        self._hover_badge_item = item
+        self._hover_badge_token += 1
+        token = self._hover_badge_token
+        self._hover_badge.hide()
+        QTimer.singleShot(320, lambda: self._show_hover_badge_if_current(item, token))
+
+    def hide_hover_badge(self, item: _NodeItem | None = None) -> None:
+        if item is None or self._hover_badge_item is item:
+            self._hover_badge_item = None
+            self._hover_badge_token += 1
+            self._hover_badge.hide()
+
+    def _hover_badge_text(self, item: _NodeItem) -> str:
+        label = tr("history_map.node_label", n=item.node.history_id)
+        if getattr(item, "_is_current", False):
+            return f"{tr('history_map.current_node')} {label}"
+        return label
+
+    def _show_hover_badge_if_current(self, item: _NodeItem, token: int) -> None:
+        if token != self._hover_badge_token or self._hover_badge_item is not item:
+            return
+        try:
+            if not item._hovered or item._view_is_panning():
+                return
+        except RuntimeError:
+            return
+        self._hover_badge.setText(self._hover_badge_text(item))
+        self._position_hover_badge(item)
+        self._hover_badge.show()
+        self._hover_badge.raise_()
+
+    def _position_hover_badge(self, item: _NodeItem | None = None) -> None:
+        item = item or self._hover_badge_item
+        if item is None or not self._hover_badge.isVisible():
+            return
+        try:
+            points = self.mapFromScene(item.sceneBoundingRect())
+        except RuntimeError:
+            self.hide_hover_badge(item)
+            return
+        rect = points.boundingRect()
+        self._hover_badge.adjustSize()
+        margin = 6
+        x = rect.center().x() - self._hover_badge.width() // 2
+        y = rect.top() - self._hover_badge.height() - margin
+        x = max(4, min(x, self.viewport().width() - self._hover_badge.width() - 4))
+        if y < 4:
+            y = min(rect.bottom() + margin, self.viewport().height() - self._hover_badge.height() - 4)
+        self._hover_badge.move(int(x), int(max(4, y)))
 
     def set_view_restricted(self, restricted: bool) -> None:
         self._view_restricted = bool(restricted)
@@ -528,6 +573,7 @@ class _HistoryMapView(QGraphicsView):
             return
         self._zoom = zoom
         self.setTransform(QTransform().scale(zoom, zoom))
+        self._position_hover_badge()
         self.zoom_changed.emit(zoom)
 
     def zoom_in_step(self) -> None:
@@ -618,6 +664,7 @@ class _HistoryMapView(QGraphicsView):
 
     def reset_selection(self) -> None:
         """rebuild で旧シーンのアイテムが破棄されるため参照だけ捨てる。"""
+        self.hide_hover_badge()
         self._selected_item = None
         self._selected_items.clear()
         self._rubber_origin = None
@@ -894,6 +941,7 @@ class _HistoryMapView(QGraphicsView):
         super().mousePressEvent(event)
 
     def _begin_pan(self, event, button) -> None:
+        self.hide_hover_badge()
         self._pan_last = event.position().toPoint()
         self._pan_button = button
         # カーソルは viewport に対して設定する（ビュー本体では効かない環境がある）
@@ -908,6 +956,7 @@ class _HistoryMapView(QGraphicsView):
         item = self._node_item_at(self.viewport().mapFromGlobal(QCursor.pos()))
         if item is not None:
             item._apply_visual(True)
+            item._schedule_view_hover_badge()
 
     def mouseMoveEvent(self, event) -> None:
         if self._pan_last is not None:
@@ -950,6 +999,14 @@ class _HistoryMapView(QGraphicsView):
         elif delta < 0:
             self.set_zoom(self._zoom / ZOOM_STEP)
         event.accept()
+
+    def scrollContentsBy(self, dx: int, dy: int) -> None:
+        super().scrollContentsBy(dx, dy)
+        self._position_hover_badge()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._position_hover_badge()
 
     def _show_blank_context_menu(self, event) -> None:
         """ノード以外（空白部）の右クリックメニュー。現在の系統に対する色変更と

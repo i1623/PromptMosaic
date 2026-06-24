@@ -1039,6 +1039,13 @@ class MainWindow(QMainWindow):
         return btn
 
     @staticmethod
+    def _short_toolbar_label(label: str, fallback: str = "❌", max_chars: int = 6) -> str:
+        label = str(label or "").strip()
+        if not label:
+            return fallback
+        return label if len(label) <= max_chars else fallback
+
+    @staticmethod
     def _set_toolbar_widget_visible(widget: QWidget | None, action, visible: bool) -> None:
         if widget is not None:
             widget.setVisible(visible)
@@ -1083,6 +1090,14 @@ class MainWindow(QMainWindow):
         self._btn_gen.clicked.connect(self._generate)
         tb.addWidget(self._btn_gen)
 
+        # 生成プラン中止（送信中または未回収の生成がある間だけ有効）
+        self._btn_cancel_plan = QToolButton()
+        self._btn_cancel_plan.setText(self._short_toolbar_label(tr("main.btn_stop")))
+        self._btn_cancel_plan.setToolTip(tr("main.btn_cancel_plan_tooltip"))
+        self._btn_cancel_plan.clicked.connect(self._cancel_generation_plan)
+        self._btn_cancel_plan.setEnabled(False)
+        tb.addWidget(self._btn_cancel_plan)
+
         self._history_one_cb = QCheckBox(tr("main.history_one_checkbox"))
         self._history_one_cb.setToolTip(tr("main.history_one_tooltip"))
         self._history_one_cb.setChecked(_get_setting("gen_history_one", "0") == "1")
@@ -1093,17 +1108,12 @@ class MainWindow(QMainWindow):
 
         self._history_map_cb = QCheckBox(tr("main.history_map_checkbox"))
         self._history_map_cb.setToolTip(tr("main.history_map_record_tooltip"))
-        self._history_map_cb.setChecked(_get_setting("gen_history_map", "0") == "1")
+        self._history_map_cb.setChecked(_get_setting("gen_history_map", "1") == "1")
         self._history_map_cb.toggled.connect(
             lambda v: _set_setting("gen_history_map", "1" if v else "0")
         )
         tb.addWidget(self._history_map_cb)
 
-        # 生成プラン中止（送信中または未回収の生成がある間だけ有効）
-        self._btn_cancel_plan = self._square_btn("❌", tr("main.btn_cancel_plan_tooltip"))
-        self._btn_cancel_plan.clicked.connect(self._cancel_generation_plan)
-        self._btn_cancel_plan.setEnabled(False)
-        tb.addWidget(self._btn_cancel_plan)
         self._update_generation_buttons()
 
         # ── Count ────────────────────────────────────────
@@ -5050,13 +5060,19 @@ class MainWindow(QMainWindow):
     def _on_history_map_node_clicked(self, history_db: str, gen_id: int, *, source: str = "") -> None:
         """履歴マップの左クリック。
 
-        画像ウィンドウが開いている時は従来どおり現在地ジャンプと画像更新を行う。
-        閉じている時は、右ペインが開いていれば該当履歴をツリー内で主張表示する。
+        常に現在地を移動する。画像ウィンドウが開いている場合は画像も更新し、
+        閉じている場合は右ペインが開いていれば該当履歴をツリー内で主張表示する。
         """
-        if self._history_image_viewer_is_open():
-            self._jump_to_editor_history_node(history_db, int(gen_id), from_map=True, source=source)
-            self._show_history_map_node_preview(history_db, int(gen_id))
+        viewer_open = self._history_image_viewer_is_open()
+        gen_id = int(gen_id)
+        self._jump_to_editor_history_node(history_db, gen_id, from_map=True, source=source)
+        if viewer_open:
+            self._show_history_map_node_preview(history_db, gen_id)
             return
+
+        QTimer.singleShot(0, lambda db=history_db, gid=gen_id: self._focus_history_item_from_map_click(db, gid))
+
+    def _focus_history_item_from_map_click(self, history_db: str, gen_id: int) -> None:
         try:
             from db.connections import get_active_history_name
             active_history = get_active_history_name()
@@ -7151,6 +7167,8 @@ class MainWindow(QMainWindow):
         self._btn_recall.setToolTip(tr("main.btn_recall_tooltip"))
         self._btn_gen.setText(tr("main.btn_generate"))
         self._btn_gen.setToolTip(tr("main.btn_generate_tooltip"))
+        self._btn_cancel_plan.setText(self._short_toolbar_label(tr("main.btn_stop")))
+        self._btn_cancel_plan.setToolTip(tr("main.btn_cancel_plan_tooltip"))
         self._history_one_cb.setText(tr("main.history_one_checkbox"))
         self._history_one_cb.setToolTip(tr("main.history_one_tooltip"))
         self._history_map_cb.setText(tr("main.history_map_checkbox"))
@@ -7193,6 +7211,8 @@ class MainWindow(QMainWindow):
     def _apply_main_control_styles(self) -> None:
         self._btn_recall.setStyleSheet(themed_button_style("accent"))
         self._btn_gen.setStyleSheet(themed_button_style("success"))
+        if hasattr(self, "_btn_cancel_plan"):
+            self._btn_cancel_plan.setStyleSheet(themed_button_style("danger"))
         option_style = (
             f"QCheckBox {{ color: {SUBTEXT}; background: transparent; spacing: 3px; }}"
             f"QCheckBox::indicator {{ width: 14px; height: 14px; }}"
