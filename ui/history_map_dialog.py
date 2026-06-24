@@ -217,6 +217,7 @@ class _NodeItem(QGraphicsRectItem):
         self._is_removed = node.deleted_at is not None
         self._selected = False
         self._is_drop_target = False
+        self._hovered = False
         self.setAcceptHoverEvents(True)
         self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
@@ -257,6 +258,30 @@ class _NodeItem(QGraphicsRectItem):
             (self.rect().width() - label_rect.width()) / 2,
             74 + (16 - label_rect.height()) / 2,
         )
+
+        self._hover_label_bg = QGraphicsRectItem(self)
+        self._hover_label_bg.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self._hover_label_bg.setBrush(QBrush(QColor(SURFACE0)))
+        self._hover_label_bg.setPen(QPen(QColor(ACCENT), 1))
+        self._hover_label_bg.setZValue(20)
+        self._hover_label_bg.setVisible(False)
+        self._hover_label = QGraphicsSimpleTextItem(tr("history_map.node_label", n=node.history_id), self)
+        self._hover_label.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        hover_font = self._hover_label.font()
+        hover_font.setPointSize(hover_font.pointSize() + 2)
+        hover_font.setBold(True)
+        self._hover_label.setFont(hover_font)
+        self._hover_label.setBrush(QBrush(QColor(TEXT)))
+        self._hover_label.setZValue(21)
+        hover_rect = self._hover_label.boundingRect()
+        hover_bg_rect = QRectF(0, 0, hover_rect.width() + 12, hover_rect.height() + 6)
+        self._hover_label_bg.setRect(hover_bg_rect)
+        self._hover_label_bg.setPos((self.rect().width() - hover_bg_rect.width()) / 2, -hover_bg_rect.height() - 8)
+        self._hover_label.setPos(
+            self._hover_label_bg.pos().x() + 6,
+            self._hover_label_bg.pos().y() + 3,
+        )
+        self._hover_label.setVisible(False)
 
         # ★評価（未評価は薄い☆5つで揃える）
         rating = max(0, min(5, int(node.rating or 0)))
@@ -331,16 +356,28 @@ class _NodeItem(QGraphicsRectItem):
         return False
 
     def hoverEnterEvent(self, event) -> None:
+        self._hovered = True
         # パン中はホバー表示しない。パン中はマウス移動イベントをビューが消費する
         # ため、シーンは「パン開始前のマウス位置」を記憶したままになる。スクロールで
         # その古い位置にノードが差しかかると hoverEnter が発火してしまう（誤点灯）
         if not self._view_is_panning():
             self._apply_visual(True)
+            QTimer.singleShot(320, self._show_hover_label_if_still_hovered)
         super().hoverEnterEvent(event)
 
     def hoverLeaveEvent(self, event) -> None:
+        self._hovered = False
+        self._set_hover_label_visible(False)
         self._apply_visual(False)  # 消灯は常に安全
         super().hoverLeaveEvent(event)
+
+    def _show_hover_label_if_still_hovered(self) -> None:
+        if self._hovered and not self._view_is_panning():
+            self._set_hover_label_visible(True)
+
+    def _set_hover_label_visible(self, visible: bool) -> None:
+        self._hover_label_bg.setVisible(visible)
+        self._hover_label.setVisible(visible)
 
     def _apply_visual(self, hovered: bool) -> None:
         if self._is_drop_target:
@@ -426,7 +463,8 @@ class _HistoryMapScene(QGraphicsScene):
 
 
 class _HistoryMapView(QGraphicsView):
-    preview_requested = Signal(str, int)         # シングルクリック（プレビュー表示）
+    node_clicked = Signal(str, int)              # 左クリック（履歴側の位置確認）
+    preview_requested = Signal(str, int)         # 画像ウィンドウ表示
     apply_requested = Signal(str, int)           # 中央ペインに反映
     stack_requested = Signal(str, int)           # 現在地スタックへ追加
     color_requested = Signal(str, int)           # 履歴背景色の変更
@@ -657,10 +695,7 @@ class _HistoryMapView(QGraphicsView):
             self._drag_item = None
             self._drag_start = None
             self._dragging_node = False
-            # マップの移動（現在地ジャンプ＋スクロール追従）を先に行い、画像表示は
-            # その後（apply 側で現在地が確定してから preview で非同期表示）。
-            self.apply_requested.emit(item.node.history_db, item.node.history_id)
-            self.preview_requested.emit(item.node.history_db, item.node.history_id)
+            self.node_clicked.emit(item.node.history_db, item.node.history_id)
 
     def node_mouse_move(self, item: _NodeItem, pos: QPoint) -> None:
         if self._drag_item is not item or self._drag_start is None:
@@ -983,6 +1018,8 @@ class _HistoryMapView(QGraphicsView):
             node.history_db == self._active_history
             and node.deleted_at != "missing_db"
         )
+        act_open_image = menu.addAction(tr("history_map.menu_open_image_window"))
+        act_open_image.setEnabled(node.deleted_at != "missing_db")
         menu.addSeparator()
 
         act_apply = menu.addAction(tr("history_map.menu_apply_center"))
@@ -1027,6 +1064,8 @@ class _HistoryMapView(QGraphicsView):
             pass
         elif chosen is act_edit:
             self.edit_requested.emit(*args)
+        elif chosen is act_open_image:
+            self.preview_requested.emit(*args)
         elif chosen is act_apply:
             self.apply_requested.emit(*args)
         elif chosen is act_stack:
@@ -1339,8 +1378,9 @@ class _HistoryImageViewerDialog(QDialog):
 
 
 class HistoryMapDialog(QDialog):
-    jump_requested = Signal(str, int)    # プレビューの右クリック（現在位置に設定）
-    preview_requested = Signal(str, int)         # シングルクリック（プレビュー）
+    node_clicked = Signal(str, int)              # 左クリック
+    jump_requested = Signal(str, int)            # 現在位置に設定
+    preview_requested = Signal(str, int)         # 画像ウィンドウ表示
     stack_requested = Signal(str, int)
     color_requested = Signal(str, int)
     text_color_requested = Signal(str, int)      # 履歴の文字色（ツリー単位）
@@ -1377,6 +1417,7 @@ class HistoryMapDialog(QDialog):
         self._scene = _HistoryMapScene(self)
         self._scene.setBackgroundBrush(QBrush(QColor(SURFACE0)))
         self._view = _HistoryMapView(self._scene)
+        self._view.node_clicked.connect(self.node_clicked.emit)
         self._view.preview_requested.connect(self.preview_requested.emit)
         self._view.apply_requested.connect(self.jump_requested.emit)
         self._view.stack_requested.connect(self.stack_requested.emit)
@@ -1907,6 +1948,7 @@ class HistoryMapPanel(QWidget):
     """中央ペインに埋め込む親子マップ。履歴マップと同じビュー実装を使う。"""
 
     jump_requested = Signal(str, int)
+    node_clicked = Signal(str, int)
     preview_requested = Signal(str, int)
     stack_requested = Signal(str, int)
     color_requested = Signal(str, int)
@@ -1951,6 +1993,7 @@ class HistoryMapPanel(QWidget):
         self._scene = _HistoryMapScene(self)
         self._scene.setBackgroundBrush(QBrush(QColor(SURFACE0)))
         self._view = _HistoryMapView(self._scene)
+        self._view.node_clicked.connect(self.node_clicked.emit)
         self._view.preview_requested.connect(self.preview_requested.emit)
         self._view.apply_requested.connect(self.jump_requested.emit)
         self._view.stack_requested.connect(self.stack_requested.emit)

@@ -5,7 +5,7 @@
 This document is a feature-by-feature reference for PromptMosaic.
 If you are using PromptMosaic for the first time, read the [Tutorial](TUTORIAL_EN.md) first.
 
-> Target version: **1.4.2** / Target Invoke: **6.13 or later**
+> Target version: **1.4.3** / Target Invoke: **6.13 or later**
 
 ---
 
@@ -246,9 +246,10 @@ Each node is a generation state. Edges show which generation came from which ear
 Use the history map to:
 
 - Move around lineage visually.
-- Select a node and restore that state.
+- Click a node to reveal the matching history item in the right pane when the right pane is open.
+- Right-click a node and choose **Open image window** to inspect the image.
 - See branches at a glance.
-- Open the image viewer for visual inspection.
+- When the image window is already open, clicking nodes keeps the previous image-window-linked behavior.
 
 ### Organization
 
@@ -256,7 +257,7 @@ Use grouping, review, and deletion tools to keep long histories readable.
 
 ### Image Viewer
 
-The image viewer opens a selected generated image for closer inspection.
+Right-click a node and choose **Open image window** to open a selected generated image for closer inspection.
 
 ### Color Customization
 

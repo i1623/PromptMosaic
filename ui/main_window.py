@@ -2097,6 +2097,11 @@ class MainWindow(QMainWindow):
         self._editor.lineage_heir_next_requested.connect(lambda: self._shift_heir(+1))
         parent_child_map = getattr(self._editor, "parent_child_map", None)
         if parent_child_map is not None:
+            parent_child_map.node_clicked.connect(
+                lambda db, gid: self._on_history_map_node_clicked(
+                    db, gid, source="central"
+                )
+            )
             parent_child_map.jump_requested.connect(
                 lambda db, gid: self._jump_to_editor_history_node(
                     db, gid, from_map=True, source="central"
@@ -4867,6 +4872,11 @@ class MainWindow(QMainWindow):
             self._history_map_dialog = HistoryMapDialog(self)
             if hasattr(self._history_map_dialog, "restore_saved_geometry"):
                 self._history_map_dialog.restore_saved_geometry()
+            self._history_map_dialog.node_clicked.connect(
+                lambda db, gid: self._on_history_map_node_clicked(
+                    db, gid, source="enlarged"
+                )
+            )
             self._history_map_dialog.jump_requested.connect(
                 lambda db, gid: self._jump_to_editor_history_node(
                     db, gid, from_map=True, source="enlarged"
@@ -5027,21 +5037,49 @@ class MainWindow(QMainWindow):
 
     def _history_image_viewer_is_open(self) -> bool:
         """画像ビューア（拡大マップ/中央マップのどちらが持っていても）が表示中か。"""
-        host = self._history_map_dialog or getattr(self._editor, "parent_child_map", None)
-        viewer = getattr(host, "_image_viewer", None) if host is not None else None
+        hosts = (self._history_map_dialog, getattr(self._editor, "parent_child_map", None))
+        for host in hosts:
+            viewer = getattr(host, "_image_viewer", None) if host is not None else None
+            try:
+                if viewer is not None and viewer.isVisible():
+                    return True
+            except RuntimeError:
+                pass
+        return False
+
+    def _on_history_map_node_clicked(self, history_db: str, gen_id: int, *, source: str = "") -> None:
+        """履歴マップの左クリック。
+
+        画像ウィンドウが開いている時は従来どおり現在地ジャンプと画像更新を行う。
+        閉じている時は、右ペインが開いていれば該当履歴をツリー内で主張表示する。
+        """
+        if self._history_image_viewer_is_open():
+            self._jump_to_editor_history_node(history_db, int(gen_id), from_map=True, source=source)
+            self._show_history_map_node_preview(history_db, int(gen_id))
+            return
         try:
-            return viewer is not None and viewer.isVisible()
-        except RuntimeError:
-            return False
+            from db.connections import get_active_history_name
+            active_history = get_active_history_name()
+        except Exception:
+            active_history = ""
+        if history_db != active_history:
+            return
+        if not getattr(self, "_right_visible", False) or not self._side_panel.isVisible():
+            return
+        if hasattr(self._side_panel, "focus_history_generation"):
+            self._side_panel.focus_history_generation(int(gen_id), animate=True, flash=True)
 
     def _open_image_viewer(self):
         """現在開いている画像ビューア（拡大/中央マップのいずれか）を返す。無ければ None。"""
-        host = self._history_map_dialog or getattr(self._editor, "parent_child_map", None)
-        viewer = getattr(host, "_image_viewer", None) if host is not None else None
-        try:
-            return viewer if (viewer is not None and viewer.isVisible()) else None
-        except RuntimeError:
-            return None
+        hosts = (self._history_map_dialog, getattr(self._editor, "parent_child_map", None))
+        for host in hosts:
+            viewer = getattr(host, "_image_viewer", None) if host is not None else None
+            try:
+                if viewer is not None and viewer.isVisible():
+                    return viewer
+            except RuntimeError:
+                pass
+        return None
 
     def _apply_image_viewer_background(self) -> None:
         """画像ウィンドウの背景色を、表示中ノードの履歴背景色（=マップ背景色と同一の

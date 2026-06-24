@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QComboBox, QApplication, QCheckBox,
     QStyledItemDelegate, QStyle, QListWidget, QListWidgetItem, QStackedWidget,
 )
-from PySide6.QtCore import Qt, QThread, QSize, Signal, QPoint, QTimer, QRect, QMimeData
+from PySide6.QtCore import Qt, QThread, QSize, Signal, QPoint, QTimer, QRect, QMimeData, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QPixmap, QIcon, QColor, QDrag, QBrush
 
 import db.app_db as _app_db
@@ -77,6 +77,7 @@ _ROLE_IS_LINEAGE_ROOT = Qt.ItemDataRole.UserRole + 16  # bool: 系譜の開祖�
 _ROLE_HISTORY_BG = Qt.ItemDataRole.UserRole + 17
 _ROLE_IS_LINEAGE_SINGLE = Qt.ItemDataRole.UserRole + 18
 _ROLE_HISTORY_FG = Qt.ItemDataRole.UserRole + 19  # 解決済みの履歴文字色（ツリー上書き>設定既定）
+_ROLE_FOCUS_FLASH = Qt.ItemDataRole.UserRole + 20
 
 
 class _StarFilter(QWidget):
@@ -278,6 +279,17 @@ class _GenerationItemDelegate(QStyledItemDelegate):
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 text,
             )
+        flash_phase = int(index.data(_ROLE_FOCUS_FLASH) or 0)
+        if flash_phase:
+            pulse = 1.0 - abs(4 - flash_phase) / 4.0
+            border = QColor("#ffe86a")
+            border.setAlpha(130 + int(100 * pulse))
+            pen = painter.pen()
+            pen.setColor(border)
+            pen.setWidth(2 + (1 if pulse > 0.55 else 0))
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(option.rect.adjusted(2, 2, -3, -3), 5, 5)
         painter.restore()
 
 
@@ -1958,6 +1970,88 @@ class HistoryTab(QWidget):
         if updated:
             QTimer.singleShot(0, self._load_visible_thumbnails)
 
+    def focus_generation(self, gen_id: int, *, animate: bool = True, flash: bool = True) -> bool:
+        """履歴マップから指定された履歴行を右ペイン内で見つけて主張表示する。"""
+        gen_id = int(gen_id)
+        item = self._id_to_item.get(gen_id)
+        if item is None and not self._has_filter():
+            row = _history_db.fetchone(
+                "SELECT group_id FROM generations WHERE id=? AND deleted_at IS NULL",
+                (gen_id,),
+            )
+            if row is not None:
+                group_id = row["group_id"]
+                group_item = self._find_group_item(int(group_id)) if group_id is not None else None
+                if group_item is None:
+                    self.refresh()
+                    group_item = self._find_group_item(int(group_id)) if group_id is not None else None
+                if group_item is not None:
+                    self._expand_group_path(group_item)
+                    if not group_item.data(0, _ROLE_LOADED):
+                        self._load_group_generations(group_item)
+                    group_item.setExpanded(True)
+                    self._sync_group_folder_icon(group_item)
+                    self._persist_expanded_group_ids()
+                    item = self._id_to_item.get(gen_id)
+        if item is None:
+            return False
+        self._select_generation_item(item)
+        if animate:
+            QTimer.singleShot(0, lambda it=item: self._scroll_to_item_animated(it))
+        else:
+            self._tree.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtCenter)
+        if flash:
+            QTimer.singleShot(120, lambda it=item: self._flash_generation_item(it))
+        QTimer.singleShot(160, self._load_visible_thumbnails)
+        return True
+
+    def _expand_group_path(self, item: QTreeWidgetItem) -> None:
+        chain: list[QTreeWidgetItem] = []
+        cur: QTreeWidgetItem | None = item
+        while cur is not None:
+            if cur.data(0, _ROLE_TYPE) == "group":
+                chain.append(cur)
+            cur = cur.parent()
+        for group_item in reversed(chain):
+            group_item.setExpanded(True)
+            self._sync_group_folder_icon(group_item)
+
+    def _scroll_to_item_animated(self, item: QTreeWidgetItem) -> None:
+        if item.data(0, _ROLE_TYPE) != "generation":
+            return
+        bar = self._tree.verticalScrollBar()
+        start = bar.value()
+        self._tree.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtCenter)
+        end = bar.value()
+        if start == end:
+            self._tree.viewport().update(self._tree.visualItemRect(item))
+            return
+        bar.setValue(start)
+        anim = QPropertyAnimation(bar, b"value", self)
+        anim.setDuration(360)
+        anim.setStartValue(start)
+        anim.setEndValue(end)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._focus_scroll_anim = anim
+        anim.finished.connect(lambda: setattr(self, "_focus_scroll_anim", None))
+        anim.start()
+
+    def _flash_generation_item(self, item: QTreeWidgetItem) -> None:
+        if item.data(0, _ROLE_TYPE) != "generation":
+            return
+        phases = [1, 2, 3, 4, 5, 6, 7, 8, 0]
+
+        def step(idx: int = 0) -> None:
+            try:
+                item.setData(0, _ROLE_FOCUS_FLASH, phases[idx])
+                self._tree.viewport().update(self._tree.visualItemRect(item))
+            except RuntimeError:
+                return
+            if idx + 1 < len(phases):
+                QTimer.singleShot(90, lambda: step(idx + 1))
+
+        step()
+
     def _select_generation_item(self, item: QTreeWidgetItem) -> None:
         self._tree.setCurrentItem(item)
         self._tree.clearSelection()
@@ -2819,6 +2913,13 @@ class SidePanel(QWidget):
 
     def refresh_history_items(self, gen_ids: list[int]) -> None:
         self._history_tab.refresh_generation_items(gen_ids)
+
+    def focus_history_generation(self, gen_id: int, *, animate: bool = True, flash: bool = True) -> bool:
+        if self._history_tile_mode:
+            self.exit_history_tile_mode()
+        self._stack.setCurrentWidget(self._tabs)
+        self._tabs.setCurrentWidget(self._history_tab)
+        return self._history_tab.focus_generation(gen_id, animate=animate, flash=flash)
 
     def refresh_for_nsfw_setting(self) -> None:
         self._history_tab.refresh()

@@ -259,7 +259,7 @@
   "main.status_full_loaded": "Tous les paramètres chargés : #{id}",
   "history_map.title": "Carte d'historique",
   "history_map.node_label": "[#{n}]",
-  "history_map.jump_tooltip": "Click: image viewer / Right-click: menu",
+  "history_map.jump_tooltip": "Clic : afficher dans le panneau d'historique / clic droit : menu",
   "history_map.current_node": "Nœud actuel",
   "history_map.target_removed": "Cette génération a été supprimée et ne peut pas être chargée",
   "history_map.detach_subtree": "Détacher en arbre indépendant et y aller",
@@ -287,6 +287,7 @@
   "history_map.zoom_in_tooltip": "Zoom avant (molette possible aussi)",
   "history_map.zoom_out_tooltip": "Zoom arrière (molette possible aussi)",
   "history_map.menu_edit": "Modifier",
+  "history_map.menu_open_image_window": "Ouvrir la fenêtre image",
   "history_map.preview_jump_hint": "Clic droit : définir comme position actuelle",
   "history_map.goto_current_tooltip": "Aller au nœud actuel (le centrer dans la vue)",
   "history_map.preview_saved": "Image enregistrée (100 %)",
@@ -1128,4 +1129,5 @@
   "history_map.reparented_status": "Changed the parent of the direct-line node",
   "history_map.reparent_invalid_status": "Nodes can only be moved under a direct ancestor"
 }
+
 

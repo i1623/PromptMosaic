@@ -274,7 +274,7 @@
   "main.status_full_loaded":      "All params loaded: #{id}",
   "history_map.title":            "Expanded History Map",
   "history_map.node_label":       "[#{n}]",
-  "history_map.jump_tooltip": "Click: image viewer / Right-click: menu",
+  "history_map.jump_tooltip": "Click: show in history pane / Right-click: menu",
   "history_map.current_node":     "Current node",
   "history_map.target_removed":   "This generation was removed and cannot be loaded",
   "history_map.detach_subtree": "Detach as separate tree and go there",
@@ -310,6 +310,7 @@
   "history_map.zoom_in_tooltip": "Zoom in (mouse wheel also works)",
   "history_map.zoom_out_tooltip": "Zoom out (mouse wheel also works)",
   "history_map.menu_edit": "Edit",
+  "history_map.menu_open_image_window": "Open image window",
   "history_map.menu_apply_center": "Apply to Center Pane",
   "history_map.menu_stack_current": "Stack current location",
   "history_map.menu_history_bg_color": "Change history background color",
@@ -1184,4 +1185,5 @@
   "main.tile_display_cycle_tooltip": "Cycle tile display: two rows (local + prompt) → local only → prompt only. The button shows the current state",
   "settings.tile_display_en": "Single row (prompt only)"
 }
+
 

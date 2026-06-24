@@ -259,7 +259,7 @@
   "main.status_full_loaded": "모든 매개변수 로드됨: #{id}",
   "history_map.title": "히스토리 맵",
   "history_map.node_label": "[#{n}]",
-  "history_map.jump_tooltip": "Click: image viewer / Right-click: menu",
+  "history_map.jump_tooltip": "클릭: 기록 패널에서 표시 / 오른쪽 클릭: 메뉴",
   "history_map.current_node": "현재 노드",
   "history_map.target_removed": "이 생성은 제거되어 로드할 수 없습니다",
   "history_map.detach_subtree": "별도 트리로 분리하고 이동",
@@ -287,6 +287,7 @@
   "history_map.zoom_in_tooltip": "확대합니다 (마우스 휠로도 가능)",
   "history_map.zoom_out_tooltip": "축소합니다 (마우스 휠로도 가능)",
   "history_map.menu_edit": "편집",
+  "history_map.menu_open_image_window": "이미지 창 열기",
   "history_map.preview_jump_hint": "우클릭: 현재 위치로 설정",
   "history_map.goto_current_tooltip": "현재 위치로 바로 이동합니다 (화면 중앙에 표시)",
   "history_map.preview_saved": "저장된 이미지 (100%)",
@@ -1128,4 +1129,5 @@
   "history_map.reparented_status": "Changed the parent of the direct-line node",
   "history_map.reparent_invalid_status": "Nodes can only be moved under a direct ancestor"
 }
+
 

@@ -259,7 +259,7 @@
   "main.status_full_loaded": "Alle Parameter geladen: #{id}",
   "history_map.title": "Verlaufskarte",
   "history_map.node_label": "[#{n}]",
-  "history_map.jump_tooltip": "Click: image viewer / Right-click: menu",
+  "history_map.jump_tooltip": "Klick: im Verlaufsbereich zeigen / Rechtsklick: Menü",
   "history_map.current_node": "Aktueller Knoten",
   "history_map.target_removed": "Diese Generierung wurde entfernt und kann nicht geladen werden",
   "history_map.detach_subtree": "Als eigenen Baum abtrennen und dorthin wechseln",
@@ -287,6 +287,7 @@
   "history_map.zoom_in_tooltip": "Vergrößern (auch mit dem Mausrad)",
   "history_map.zoom_out_tooltip": "Verkleinern (auch mit dem Mausrad)",
   "history_map.menu_edit": "Bearbeiten",
+  "history_map.menu_open_image_window": "Bildfenster öffnen",
   "history_map.preview_jump_hint": "Rechtsklick: als aktuelle Position setzen",
   "history_map.goto_current_tooltip": "Zum aktuellen Knoten springen (in der Ansicht zentrieren)",
   "history_map.preview_saved": "Gespeichertes Bild (100 %)",
@@ -1128,4 +1129,5 @@
   "history_map.reparented_status": "Changed the parent of the direct-line node",
   "history_map.reparent_invalid_status": "Nodes can only be moved under a direct ancestor"
 }
+
 

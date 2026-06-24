@@ -259,7 +259,7 @@
   "main.status_full_loaded": "已加载全部参数：#{id}",
   "history_map.title": "历史地图",
   "history_map.node_label": "[#{n}]",
-  "history_map.jump_tooltip": "Click: image viewer / Right-click: menu",
+  "history_map.jump_tooltip": "单击：在历史面板中显示 / 右键：菜单",
   "history_map.current_node": "当前节点",
   "history_map.target_removed": "此次生成已被移除，无法加载",
   "history_map.detach_subtree": "断开为独立树并移动",
@@ -287,6 +287,7 @@
   "history_map.zoom_in_tooltip": "放大（也可使用鼠标滚轮）",
   "history_map.zoom_out_tooltip": "缩小（也可使用鼠标滚轮）",
   "history_map.menu_edit": "编辑",
+  "history_map.menu_open_image_window": "打开图像窗口",
   "history_map.preview_jump_hint": "右键：设为当前位置",
   "history_map.goto_current_tooltip": "直达当前节点（在视图中居中显示）",
   "history_map.preview_saved": "已保存图像（100%）",
@@ -1128,4 +1129,5 @@
   "history_map.reparented_status": "Changed the parent of the direct-line node",
   "history_map.reparent_invalid_status": "Nodes can only be moved under a direct ancestor"
 }
+
 

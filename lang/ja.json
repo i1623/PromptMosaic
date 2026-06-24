@@ -274,7 +274,7 @@
   "main.status_full_loaded":      "全パラメータをロード: #{id}",
   "history_map.title":            "拡大履歴マップ",
   "history_map.node_label":       "[#{n}]",
-  "history_map.jump_tooltip": "クリック: 画像ビューア / 右クリック: メニュー",
+  "history_map.jump_tooltip": "クリック: 右ペインの履歴で表示 / 右クリック: メニュー",
   "history_map.current_node":     "現在地",
   "history_map.target_removed":   "この生成は削除済みのため移動できません",
   "history_map.detach_subtree": "別系統にして移動",
@@ -310,6 +310,7 @@
   "history_map.zoom_in_tooltip": "拡大します（マウスホイールでも操作できます）",
   "history_map.zoom_out_tooltip": "縮小します（マウスホイールでも操作できます）",
   "history_map.menu_edit": "編集",
+  "history_map.menu_open_image_window": "画像ウィンドウを開く",
   "history_map.menu_apply_center": "中央ペインに反映",
   "history_map.menu_stack_current": "現在地をスタック",
   "history_map.menu_history_bg_color": "履歴背景色を変更",
@@ -1184,4 +1185,5 @@
   "main.tile_display_cycle_tooltip": "タイル表示を巡回切替: 2段（現地語+プロンプト）→ 現地語1段 → プロンプト1段。ボタンは現在の表示状態を示します",
   "settings.tile_display_en": "1段表示（プロンプトのみ）"
 }
+
 
