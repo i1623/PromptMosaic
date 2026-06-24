@@ -4316,10 +4316,17 @@ class MainWindow(QMainWindow):
             return (db, int(id_str))
         return None
 
-    def _set_current_editor_history_node(self, history_db: str, gen_id: int) -> None:
+    def _set_current_editor_history_node(
+        self,
+        history_db: str,
+        gen_id: int,
+        *,
+        refresh_lineage: bool = True,
+    ) -> None:
         _set_setting("editor_history_current_history_db", history_db)
         _set_setting("editor_history_current_history_id", str(gen_id))
-        self._refresh_lineage_card()
+        if refresh_lineage:
+            self._refresh_lineage_card()
 
     def _lineage_row_item(self, history_db: str, gen_id: int) -> dict | None:
         from pathlib import Path
@@ -5413,7 +5420,12 @@ class MainWindow(QMainWindow):
                 seed = -1
             if seed >= 0:
                 self._seed_spin.setValue(max(0, min(2_147_483_647, seed)))
-            self._set_current_editor_history_node(history_db, gen_id)
+            _mark("seed")
+            self._set_current_editor_history_node(
+                history_db,
+                gen_id,
+                refresh_lineage=not from_map,
+            )
             self._history_map_dialog_focus = (history_db, gen_id)
             _mark("set_current")
             if from_map:
