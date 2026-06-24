@@ -538,7 +538,10 @@ class _HistoryMapView(QGraphicsView):
 
     def _position_hover_badge(self, item: _NodeItem | None = None) -> None:
         item = item or self._hover_badge_item
-        if item is None or not self._hover_badge.isVisible():
+        if item is None:
+            return
+        if item.scene() is not self.scene():
+            self.hide_hover_badge(item)
             return
         try:
             points = self.mapFromScene(item.sceneBoundingRect())
