@@ -19,7 +19,6 @@ import json
 import hashlib
 import random
 import sys
-from time import perf_counter
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QSplitter, QToolBar, QTabWidget,
@@ -5053,38 +5052,6 @@ class MainWindow(QMainWindow):
         self._history_map_dialog.rebuild(nodes, current, self._history_map_opened_node)
         self._refresh_lineage_two_row_view()
 
-    def _history_map_profile_host(self, name: str, host) -> str:
-        if host is None:
-            return f"{name}=none"
-        parts = [name]
-        try:
-            parts.append(f"visible={int(host.isVisible())}")
-        except Exception:
-            pass
-        try:
-            parts.append(f"nodes={len(getattr(host, '_items_by_key', {}) or {})}")
-        except Exception:
-            pass
-        try:
-            scene = getattr(host, "_scene", None)
-            parts.append(f"items={len(scene.items()) if scene is not None else 0}")
-        except Exception:
-            parts.append("items=?")
-        try:
-            view = getattr(host, "_view", None)
-            if view is not None:
-                parts.append(f"zoom={view.transform().m11():.2f}")
-        except Exception:
-            pass
-        return "(" + " ".join(parts) + ")"
-
-    def _history_map_profile_snapshot(self) -> str:
-        panel = getattr(self._editor, "parent_child_map", None)
-        return " ".join((
-            self._history_map_profile_host("enlarged", self._history_map_dialog),
-            self._history_map_profile_host("central", panel),
-        ))
-
     def _update_history_maps_current_node_fast(self, current: tuple[str, int]) -> bool:
         """履歴マップの現在地表示だけを差分更新する。
 
@@ -5094,40 +5061,15 @@ class MainWindow(QMainWindow):
         """
         opened = self._history_map_opened_node
         updated_any = False
-        stats: list[str] = []
-        hosts = (
-            ("enlarged", self._history_map_dialog),
-            ("central", getattr(self._editor, "parent_child_map", None)),
-        )
-        for name, host in hosts:
+        for host in (self._history_map_dialog, getattr(self._editor, "parent_child_map", None)):
             if host is None or not hasattr(host, "update_current_node"):
-                stats.append(f"{name}:skip")
                 continue
-            items = getattr(host, "_items_by_key", {}) or {}
-            node_count = len(items)
-            has_target = current in items
-            t0 = perf_counter()
             try:
                 if not host.update_current_node(current, opened):
-                    elapsed = (perf_counter() - t0) * 1000
-                    stats.append(
-                        f"{name}:fallback nodes={node_count} "
-                        f"target={int(has_target)} {elapsed:.1f}ms"
-                    )
-                    self._history_map_last_fast_update_stats = stats
                     return False
                 updated_any = True
-                elapsed = (perf_counter() - t0) * 1000
-                stats.append(
-                    f"{name}:ok nodes={node_count} "
-                    f"target={int(has_target)} {elapsed:.1f}ms"
-                )
             except RuntimeError:
-                elapsed = (perf_counter() - t0) * 1000
-                stats.append(f"{name}:runtime-error nodes={node_count} {elapsed:.1f}ms")
-                self._history_map_last_fast_update_stats = stats
                 return False
-        self._history_map_last_fast_update_stats = stats
         return updated_any
 
     def _history_image_viewer_is_open(self) -> bool:
@@ -5383,14 +5325,6 @@ class MainWindow(QMainWindow):
         # source: 操作元のマップ。"central"=中央ペイン / "enlarged"=拡大ダイアログ。
         # 操作したマップ自身はスクロールさせず（ユーザーが見ている）、反対側のマップを
         # 現在地へ滑らかにスクロール追従させる。それ以外（系譜カード等）は両方追従。
-        profile_enabled = bool(from_map)
-        profile_start = perf_counter()
-        profile_marks: list[tuple[str, float]] = []
-
-        def _mark(label: str) -> None:
-            if profile_enabled:
-                profile_marks.append((label, (perf_counter() - profile_start) * 1000))
-
         from db.connections import get_history_conn, history_db_path
         db_path = history_db_path(history_db)
         if not db_path.exists():
@@ -5403,14 +5337,12 @@ class MainWindow(QMainWindow):
             ).fetchone()
         except Exception:
             row = None
-        _mark("row")
         if not row:
             self._show_status(tr("history_map.target_removed"), error=True)
             self._open_history_map()
             return
         old_current = self._current_editor_history_node()
         if self._load_generation_for_history_jump(gen_id, history_db):
-            _mark("load_generation")
             # 履歴のシード値をスピンボックスにだけ反映する。
             # シード固定でプロンプト起因の変化を見る用途のため、ランダムCB・
             # 🔓/🔒 固定トグルの状態は変えない（値だけ持ってくる）
@@ -5420,28 +5352,22 @@ class MainWindow(QMainWindow):
                 seed = -1
             if seed >= 0:
                 self._seed_spin.setValue(max(0, min(2_147_483_647, seed)))
-            _mark("seed")
             self._set_current_editor_history_node(
                 history_db,
                 gen_id,
                 refresh_lineage=not from_map,
             )
             self._history_map_dialog_focus = (history_db, gen_id)
-            _mark("set_current")
             if from_map:
                 # マップクリックはノード構造を変えず、現在地だけが移動する。
                 # 全 rebuild はノード数に比例して重いので、既存ノードの表示だけ差し替える。
-                fast_ok = True
                 if not self._update_history_maps_current_node_fast((history_db, gen_id)):
-                    fast_ok = False
                     self._refresh_history_map_dialog()
-                _mark("map_update_fast" if fast_ok else "map_update_rebuild")
             else:
                 # ジャンプしてもマップは閉じない（連続ジャンプを許す）
                 self._refresh_history_map_dialog()
             # 現在地へのスクロール追従（操作したマップ自身は動かさない）。
             self._follow_current_in_maps(source)
-            _mark("follow_current")
             if from_map:
                 # 移動アニメ（青枠が旧→新ノードへ滑る）。
                 # クリックは apply→preview の順で発火し、preview 側の再構築
@@ -5450,55 +5376,12 @@ class MainWindow(QMainWindow):
                 # すべての同期再構築が終わった次のイベントループで生成・再生する。
                 new_key = (history_db, gen_id)
                 old_key = old_current
-                scheduled_ms = (perf_counter() - profile_start) * 1000
-                self._history_map_pending_move_profile = {
-                    "source": source or "-",
-                    "target": new_key,
-                    "old": old_current,
-                    "scheduled_ms": scheduled_ms,
-                    "scheduled_at": perf_counter(),
-                    "marks": list(profile_marks),
-                    "fast": list(getattr(self, "_history_map_last_fast_update_stats", [])),
-                    "follow": list(getattr(self, "_history_map_last_follow_stats", [])),
-                }
                 QTimer.singleShot(
                     0, lambda o=old_key, n=new_key: self._play_map_move_animation(o, n)
                 )
 
     def _play_map_move_animation(self, old_key, new_key) -> None:
         """中央/拡大マップで、旧→新ノードへ青枠が滑る移動アニメを再生する。"""
-        pending = getattr(self, "_history_map_pending_move_profile", None)
-        if pending is not None and pending.get("target") == new_key:
-            try:
-                queue_wait_ms = (perf_counter() - float(pending.get("scheduled_at", perf_counter()))) * 1000
-            except Exception:
-                queue_wait_ms = 0.0
-            scheduled_ms = float(pending.get("scheduled_ms", 0.0))
-            detail = " ".join(
-                f"{label}={ms:.1f}ms"
-                for label, ms in pending.get("marks", [])
-            )
-            snapshot = self._history_map_profile_snapshot()
-            print(
-                "[history-map-profile] "
-                f"jump source={pending.get('source', '-')} target={new_key} "
-                f"old={pending.get('old')} schedule={scheduled_ms:.1f}ms "
-                f"{detail} "
-                f"fast={pending.get('fast', [])} "
-                f"follow={pending.get('follow', [])} "
-                f"{snapshot}",
-                flush=True,
-            )
-            print(
-                "[history-map-profile] "
-                f"move_animation_start target={new_key} "
-                f"click_to_schedule={scheduled_ms:.1f}ms "
-                f"queue_wait={queue_wait_ms:.1f}ms "
-                f"click_to_start={(scheduled_ms + queue_wait_ms):.1f}ms "
-                f"now={snapshot}",
-                flush=True,
-            )
-            self._history_map_pending_move_profile = None
         if self._history_map_dialog is not None:
             self._history_map_dialog.play_move_animation(old_key, new_key)
         panel = getattr(self._editor, "parent_child_map", None)
@@ -5513,24 +5396,12 @@ class MainWindow(QMainWindow):
         それ以外（生成・系譜カード等）は表示中の両方を現在地へ追従させる。
         """
         panel = getattr(self._editor, "parent_child_map", None)
-        stats: list[str] = []
         if source != "central" and panel is not None and hasattr(panel, "scroll_to_current_animated"):
-            t0 = perf_counter()
             panel.scroll_to_current_animated()
-            stats.append(
-                f"central:nodes={len(getattr(panel, '_items_by_key', {}) or {})} "
-                f"{((perf_counter() - t0) * 1000):.1f}ms"
-            )
         dlg = self._history_map_dialog
         if (source != "enlarged" and dlg is not None and dlg.isVisible()
                 and hasattr(dlg, "scroll_to_current_animated")):
-            t0 = perf_counter()
             dlg.scroll_to_current_animated()
-            stats.append(
-                f"enlarged:nodes={len(getattr(dlg, '_items_by_key', {}) or {})} "
-                f"{((perf_counter() - t0) * 1000):.1f}ms"
-            )
-        self._history_map_last_follow_stats = stats
 
     def _edit_history_map_node(self, history_db: str, gen_id: int) -> None:
         """履歴マップの「編集」: 右ペインと同じ履歴の編集ダイアログを開く。"""
