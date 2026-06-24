@@ -364,6 +364,8 @@ Do not delete the old folder before updating, or the `data` folder will be lost.
 
 If you save only `update_windows.bat` from GitHub, open **Raw** on the file page before saving. Saving the normal GitHub page creates an HTML file starting with `<!DOCTYPE html>`, which cannot run as a batch file.
 
+If the repository is private, the automatic ZIP download may return 404 even when the repository is visible in your browser. Install Git for Windows and make sure you are signed in to GitHub. The updater falls back to `git clone` when ZIP download fails.
+
 ### Backup
 
 PromptMosaic backup is handled by copying the entire `data` folder.
