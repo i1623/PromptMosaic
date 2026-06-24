@@ -74,7 +74,7 @@ Prompts, history, fetched model information, and generation templates are stored
 3. Double-click `update_windows.bat`.
 4. When the console shows `Update complete.`, the update is finished.
 
-`update_windows.bat` first copies the `data` folder to `_update_backups`. For Git installs it runs `git pull`; for ZIP installs it downloads the latest ZIP from GitHub and updates the application files automatically. It then updates the required Python packages.
+`update_windows.bat` downloads the latest ZIP from GitHub and replaces the application files while preserving `data`, `.venv`, `.git`, and `_update_backups`. It asks whether to back up the `data` folder before updating.
 
 ---
 

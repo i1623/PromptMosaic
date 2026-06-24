@@ -356,7 +356,9 @@ PromptMosaic user data is stored in the `data` folder. This includes fetched mod
 3. Double-click `update_windows.bat`.
 4. When the console shows `Update complete.`, the update is finished.
 
-`update_windows.bat` automatically copies the `data` folder to `_update_backups`. For Git installs it runs `git pull`; for ZIP installs it downloads the latest ZIP from GitHub into a temporary folder and updates the application files. It then updates the Python environment according to `requirements.txt`.
+`update_windows.bat` downloads the latest ZIP from GitHub into a temporary folder and replaces the application files while preserving `data`, `.venv`, `.git`, and `_update_backups`. It then updates the Python environment according to `requirements.txt`.
+
+Before updating, it asks whether to copy the `data` folder to `_update_backups`. If disk space is tight, you can skip this backup; choose `Y` if you want the extra safety copy.
 
 Do not delete the old folder before updating, or the `data` folder will be lost. Run `update_windows.bat` inside the folder you have been using.
 
