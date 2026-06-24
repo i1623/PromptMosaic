@@ -76,6 +76,8 @@ Prompts, history, fetched model information, and generation templates are stored
 
 `update_windows.bat` downloads the latest ZIP from GitHub and replaces the application files while preserving `data`, `.venv`, `.git`, and `_update_backups`. It asks whether to back up the `data` folder before updating.
 
+> If you save only `update_windows.bat` from GitHub, open **Raw** first and save that file. Saving the normal GitHub page creates an HTML file with a `.bat` name, and it will not run. Downloading the full ZIP is the safer option.
+
 ---
 
 ## License

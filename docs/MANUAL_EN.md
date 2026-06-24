@@ -362,6 +362,8 @@ Before updating, it asks whether to copy the `data` folder to `_update_backups`.
 
 Do not delete the old folder before updating, or the `data` folder will be lost. Run `update_windows.bat` inside the folder you have been using.
 
+If you save only `update_windows.bat` from GitHub, open **Raw** on the file page before saving. Saving the normal GitHub page creates an HTML file starting with `<!DOCTYPE html>`, which cannot run as a batch file.
+
 ### Backup
 
 PromptMosaic backup is handled by copying the entire `data` folder.
