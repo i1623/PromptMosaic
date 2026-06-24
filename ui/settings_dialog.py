@@ -3,8 +3,8 @@
 
 タブ構成:
   - 表示 (Appearance): 言語 / テーマ / フォントサイズ / タイル表示 / NSFW / アイコン
-  - 接続 (Connection): InvokeAI URL / キューID
-  - 生成管理 (Generation): InvokeAIテンプレート管理 / マルチモデルプラン
+  - 接続 (Connection): Invoke URL / キューID
+  - 生成管理 (Generation): Invokeテンプレート管理 / マルチモデルプラン
   - データ (Data): バックアップ案内 / キャッシュ管理
 
 保存時: app_settings テーブルへ INSERT OR REPLACE で書き込む。
@@ -529,7 +529,7 @@ class SettingsDialog(QDialog):
             b.setStyleSheet(_settings_button_style(kind))
             return b
 
-        # テンプレートの「取得」は初期セットアップ（InvokeAI データ取得）に集約。
+        # テンプレートの「取得」は初期セットアップ（Invoke データ取得）に集約。
         # ここでは管理（名前変更・複製・既定設定・削除）のみ。
         self._btn_tmpl_rename = _styled(tr("settings.tmpl_btn_rename"))
         self._btn_tmpl_rename.clicked.connect(self._on_template_rename)
@@ -953,7 +953,7 @@ class SettingsDialog(QDialog):
             _read_setting("suggestions_rebuild_on_startup", "0") == "1"
         )
 
-        # InvokeAI URL
+        # Invoke URL
         endpoint = _read_setting("invoke_endpoint", "")
         if not endpoint and self._client is not None:
             endpoint = getattr(self._client, "endpoint", "") or ""
@@ -1062,3 +1062,4 @@ class SettingsDialog(QDialog):
     def _save_and_close(self) -> None:
         self._do_save()
         self.accept()
+

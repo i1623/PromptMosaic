@@ -7,7 +7,7 @@
 
 | ファイル名 | 内容 | 参照元 |
 | --- | --- | --- |
-| `hero.jpg` | InvokeAI と PromptMosaic を分割表示した代表画像（ヒーロー画像） | README |
+| `hero.jpg` | Invoke と PromptMosaic を分割表示した代表画像（ヒーロー画像） | README |
 | `github_download_zip.png` | GitHub の Code → Download ZIP メニュー | TUTORIAL |
 | `browser_download_zip.png` | ブラウザのダウンロード欄に表示された PromptMosaic-main.zip | TUTORIAL |
 | `windows_extract_zip.png` | Windows の「すべて展開」画面 | TUTORIAL |
@@ -16,7 +16,7 @@
 | `install_progress.png` | install_windows.bat 実行中のコンソール | TUTORIAL |
 | `install_complete.png` | install_windows.bat 完了後のコンソール | TUTORIAL |
 | `main_window.png` | 起動直後のメイン画面全体 | TUTORIAL |
-| `invoke_setup_starting.png` | InvokeAI データ取得ウィザード起動直後 | TUTORIAL |
+| `invoke_setup_starting.png` | Invoke データ取得ウィザード起動直後 | TUTORIAL |
 | `invoke_setup_templates_empty.png` | モデル / LoRA 取得後、テンプレート未取得の状態 | TUTORIAL |
 | `invoke_setup_template_name.png` | テンプレート名入力ダイアログ | TUTORIAL |
 | `invoke_setup_template_saved.png` | 1つのテンプレートを取得した状態 | TUTORIAL |
@@ -33,3 +33,4 @@
 | `plan_dialog.png` | マルチモデルプラン編集ダイアログ | MANUAL |
 
 > ヒーロー画像以外のスクリーンショットは、未配置でもドキュメントを読めるように差し込み位置だけを残しています。
+

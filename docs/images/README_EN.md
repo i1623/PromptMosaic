@@ -7,7 +7,7 @@ File names match the screenshot placeholder comments in each document.
 
 | File name | Contents | Referenced by |
 | --- | --- | --- |
-| `hero.jpg` | Hero image showing InvokeAI and PromptMosaic side by side | README |
+| `hero.jpg` | Hero image showing Invoke and PromptMosaic side by side | README |
 | `github_download_zip.png` | GitHub Code -> Download ZIP menu | TUTORIAL |
 | `browser_download_zip.png` | PromptMosaic-main.zip shown in the browser download list | TUTORIAL |
 | `windows_extract_zip.png` | Windows Extract All screen | TUTORIAL |
@@ -16,7 +16,7 @@ File names match the screenshot placeholder comments in each document.
 | `install_progress.png` | Console while install_windows.bat is running | TUTORIAL |
 | `install_complete.png` | Console after install_windows.bat completes | TUTORIAL |
 | `main_window.png` | Full main window immediately after launch | TUTORIAL |
-| `invoke_setup_starting.png` | InvokeAI Data Acquisition wizard at startup | TUTORIAL |
+| `invoke_setup_starting.png` | Invoke Data Acquisition wizard at startup | TUTORIAL |
 | `invoke_setup_templates_empty.png` | Template rows before templates are fetched | TUTORIAL |
 | `invoke_setup_template_name.png` | Template name dialog | TUTORIAL |
 | `invoke_setup_template_saved.png` | One fetched template in the wizard | TUTORIAL |
@@ -33,3 +33,4 @@ File names match the screenshot placeholder comments in each document.
 | `plan_dialog.png` | Multi-model plan editor dialog | MANUAL |
 
 > Screenshots other than the hero image are still represented by placeholders so the documents remain readable before they are added.
+

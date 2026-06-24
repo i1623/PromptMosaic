@@ -134,7 +134,7 @@ def _show_nsfw() -> bool:
 
 class _SyncWorker(QThread):
     """
-    InvokeAI APIからモデル/LoRA一覧を取得してDBを更新するワーカー。
+    Invoke APIからモデル/LoRA一覧を取得してDBを更新するワーカー。
 
     Signals:
         finished(): 正常完了
@@ -149,7 +149,7 @@ class _SyncWorker(QThread):
 
     def run(self) -> None:
         try:
-            # InvokeAI 6.13 以降、フィルターなしの /api/v2/models/ は 0 件を返す。
+            # Invoke 6.13 以降、フィルターなしの /api/v2/models/ は 0 件を返す。
             # クエリパラメータ名も変更された（type → model_type, base → base_models）。
             # main / lora を明示指定して個別取得し、結合して処理する。
             # ゼロ件の場合は DB を壊さないよう中断する。
@@ -160,7 +160,7 @@ class _SyncWorker(QThread):
 
             if not models:
                 raise RuntimeError(
-                    "InvokeAI が main/lora モデルを 0 件返しました。"
+                    "Invoke が main/lora モデルを 0 件返しました。"
                     "同期を中止します（既存データを保護）。"
                 )
 
@@ -196,7 +196,7 @@ class _SyncWorker(QThread):
                      m.get("base", "sdxl"), mtype, m.get("variant") or None),
                 )
 
-            # InvokeAIに存在しないモデルを「削除済み」に
+            # Invokeに存在しないモデルを「削除済み」に
             if invoke_keys:
                 placeholders = ",".join("?" * len(invoke_keys))
                 _env_db.execute(
@@ -1242,7 +1242,7 @@ class ModelBrowser(QWidget):
     def _reset_template(self, invoke_key: str, base: str) -> None:
         """
         このモデルに対応するテンプレートキャッシュを削除する。
-        次回生成時にInvokeAIから再取得される（VAEや設定を間違えて保存してしまった時の救済策）。
+        次回生成時にInvokeから再取得される（VAEや設定を間違えて保存してしまった時の救済策）。
         """
         from pathlib import Path
         from api.invoke_client import InvokeClient
@@ -2972,3 +2972,4 @@ class LoRABrowser(QWidget):
         self._sync_notify = False
         self._hdr.set_syncing(False)
         QMessageBox.warning(self, tr("model_browser.sync_error_title"), msg)
+

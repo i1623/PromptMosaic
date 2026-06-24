@@ -57,7 +57,7 @@ import core.local_storage as local_storage
 from api.lm_client import LMClient, LMStudioError, translation_fallback_from_thinking
 from core.text_sanitize import single_line_text
 
-# ベース別スケジューラーリスト（フォールバック用ハードコード、InvokeAI OpenAPI仕様に基づく）
+# ベース別スケジューラーリスト（フォールバック用ハードコード、Invoke OpenAPI仕様に基づく）
 # 接続時に fetch_scheduler_map() で上書きされる
 _SCHEDULERS: dict[str, list[str]] = {
     "sdxl":    ["ddim", "ddpm", "deis", "deis_k", "lms", "lms_k", "pndm",
@@ -324,7 +324,7 @@ class _AdoptHistoryDialog(QDialog):
 # ── UTC タイムスタンプ変換（複数ワーカーから共用） ────────────────────────
 
 def _utc_to_local(ts: str) -> str:
-    """InvokeAI の UTC タイムスタンプをローカル時刻文字列に変換する。"""
+    """Invoke の UTC タイムスタンプをローカル時刻文字列に変換する。"""
     if not ts:
         return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
@@ -371,7 +371,7 @@ class _ConnCheckWorker(QThread):
 # ── ボード一覧取得ワーカー ────────────────────────────────────────────────
 
 class _BoardListWorker(QThread):
-    """InvokeAI のボード一覧をバックグラウンドで取得するワーカー。"""
+    """Invoke のボード一覧をバックグラウンドで取得するワーカー。"""
 
     loaded = Signal(list)
     failed = Signal(str)
@@ -388,7 +388,7 @@ class _BoardListWorker(QThread):
 
 
 class _NodeFullImageWorker(QThread):
-    """履歴マップのプレビュー用フル画像を InvokeAI からバックグラウンド取得する。
+    """履歴マップのプレビュー用フル画像を Invoke からバックグラウンド取得する。
 
     ノードクリック時はまずローカル/サムネイルを即時表示し、フル画像はこのワーカーで
     取得して後から差し替える（UIスレッドを同期 HTTP でブロックしないため）。
@@ -415,7 +415,7 @@ class _NodeFullImageWorker(QThread):
 
 class _HistorySyncWorker(QThread):
     """
-    InvokeAI 画像一覧 API → DB バックフィル をバックグラウンドで実行するワーカー。
+    Invoke 画像一覧 API → DB バックフィル をバックグラウンドで実行するワーカー。
     images_list() + N × image_metadata() をメインスレッド外で行う。
 
     Signals:
@@ -487,7 +487,7 @@ class _HistorySyncWorker(QThread):
             for item_id in item_ids:
                 if isinstance(item_id, int):
                     ordered_item_ids.append(item_id)
-            # InvokeAI からの item_ids は新しいものが先頭に並ぶため、
+            # Invoke からの item_ids は新しいものが先頭に並ぶため、
             # ユーザーが指定した 1 枚目は末尾側になる。
             item_order_map = {
                 item_id: idx
@@ -565,7 +565,7 @@ class _HistorySyncWorker(QThread):
                         changed_gen_ids.add(int(gen_id))
 
                     elif status in ("canceled", "cancelled", "failed", "error"):
-                        # InvokeAI の正式値は "canceled"（L1つ）。旧綴りも保険で残す
+                        # Invoke の正式値は "canceled"（L1つ）。旧綴りも保険で残す
                         # 終端失敗状態: このアイテムからは画像が来ない
                         pass  # gen_still_pending は変えない
 
@@ -575,7 +575,7 @@ class _HistorySyncWorker(QThread):
 
                 except Exception:
                     # 接続エラー等も終端失敗（canceled/failed/error）と同列に扱う。
-                    # InvokeAI のキューは再起動で再開されないため待つ意味がない。
+                    # Invoke のキューは再起動で再開されないため待つ意味がない。
                     # 削除対象になるのは画像を1枚も取得できていない行のみ
                     # （下の aborted 判定条件）なので、画像取り込み済みの行が
                     # 一時的な接続エラーで消えることはない。
@@ -612,9 +612,9 @@ class _HistorySyncWorker(QThread):
 
 class _SendQueueWorker(QThread):
     """
-    送信キュー（send_queue.db）の全ユニットを順次 InvokeAI へ送るワーカー。
+    送信キュー（send_queue.db）の全ユニットを順次 Invoke へ送るワーカー。
 
-    完了を待たずに一気に送る（残数は InvokeAI のキューカウンター=ステータスバーで
+    完了を待たずに一気に送る（残数は Invoke のキューカウンター=ステータスバーで
     見える）。1ユニット = generate_batch() 1回分。送信したら sent_item_ids を
     キューレコードに控え（クラッシュ時の二重送信防止）、unit_sent を emit する。
     履歴行への item_ids 割当とレコード削除はメインスレッド側が行う。
@@ -672,7 +672,7 @@ class _SendQueueWorker(QThread):
 
 
 class _CancelItemsWorker(QThread):
-    """発行済み item_id を InvokeAI で個別キャンセルするワーカー（ベストエフォート）。
+    """発行済み item_id を Invoke で個別キャンセルするワーカー（ベストエフォート）。
 
     完了済みアイテムへのキャンセルは無害。接続不可ならそれ以降は諦める
     （Invoke 再起動でキューは消えているので実害なし）。
@@ -959,14 +959,14 @@ class MainWindow(QMainWindow):
         self._translate_has_failure: bool = False        # 複数行翻訳: いずれかの行が失敗したか
         self._lm_prompt_window = None                           # フローティングプロンプト編集ウィンドウ
         self._lm_model_meta: dict[str, dict] = {}               # LM Studio モデル詳細
-        self._selected_model_key: str = ""                 # 選択中モデルの InvokeAI キー
+        self._selected_model_key: str = ""                 # 選択中モデルの Invoke キー
         self._selected_plan_id: int | None = None          # 選択中マルチモデルプラン
         self._current_base: str = "sdxl"                   # 選択中モデルのベース種別
         self._last_model_key_by_base: dict[str, str] = {}  # ベース別の直前選択モデル
         self._current_template_id: int | None = None       # 選択中テンプレートの id
         self._current_template_name: str = ""              # 選択中テンプレートの表示名
         self._negative_supported: bool = True              # 現在テンプレートがネガティブを実送信できるか
-        self._boards: list[dict] = []                      # InvokeAI ボード一覧
+        self._boards: list[dict] = []                      # Invoke ボード一覧
         self._editor_dirty: bool = False                   # プロンプト編集済みフラグ
         self._history_full_drop_widgets: set[QWidget] = set()
         self._history_prompt_drop_widgets: set[QWidget] = set()
@@ -1343,7 +1343,7 @@ class MainWindow(QMainWindow):
 
         pb.addSeparator()
 
-        # ── InvokeAI 保存先ボード ─────────────────────────
+        # ── Invoke 保存先ボード ─────────────────────────
         self._board_label = QLabel(tr("main.board_label"))
         pb.addWidget(self._board_label)
         self._board_combo = _WidePopupComboBox(min_width=180, max_width=360)
@@ -1417,7 +1417,7 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _snap_dimension(spin: "QSpinBox", multiple: int = 8) -> None:
         """幅・高さスピンボックスの値を multiple の倍数（最近傍）に補正する。
-        InvokeAI は幅・高さが 8 の倍数でないと 422 エラーを返す。
+        Invoke は幅・高さが 8 の倍数でないと 422 エラーを返す。
         """
         v = spin.value()
         snapped = max(spin.minimum(), min(spin.maximum(), round(v / multiple) * multiple))
@@ -1763,7 +1763,7 @@ class MainWindow(QMainWindow):
         return str(data) if data else None
 
     def _restore_board_selection(self) -> None:
-        """起動時は保存済みボードだけ復元し、InvokeAI への一覧取得は行わない。"""
+        """起動時は保存済みボードだけ復元し、Invoke への一覧取得は行わない。"""
         if not hasattr(self, "_board_combo"):
             return
         saved_board_id = _get_setting("selected_board_id", "")
@@ -1778,7 +1778,7 @@ class MainWindow(QMainWindow):
         self._board_combo.adjust_to_current_text()
 
     def _refresh_boards(self) -> None:
-        """InvokeAI のボード一覧を非同期取得し、保存先コンボに反映する。"""
+        """Invoke のボード一覧を非同期取得し、保存先コンボに反映する。"""
         if not hasattr(self, "_board_combo"):
             return
         if self._board_worker is not None and self._board_worker.isRunning():
@@ -2317,7 +2317,7 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError, UnicodeDecodeError):
             return None
 
-    # ── InvokeAI 操作 ────────────────────────────────────
+    # ── Invoke 操作 ────────────────────────────────────
 
     @staticmethod
     def _build_seeds(base_seed: int, seed_fixed: bool, count: int) -> list[int]:
@@ -3025,7 +3025,7 @@ class MainWindow(QMainWindow):
         QProgressDialog.close() は **canceled シグナルを発火する**（hide() は発火しない）。
         `_start_send_queue` で canceled→_cancel_generation_plan を接続しているため、
         送信成功後に close() で閉じると _cancel_generation_plan が誤発火し、
-        送ったばかりの InvokeAI item を即キャンセルしてしまう（画像が出ない不具合の真因）。
+        送ったばかりの Invoke item を即キャンセルしてしまう（画像が出ない不具合の真因）。
         対策: 正常クローズ時はシグナルを切ってから hide()+deleteLater で破棄する。
         ユーザーの中止操作（Cancelボタン/×/ESC）は接続が生きたまま発火するので従来どおり機能する。
         """
@@ -3056,7 +3056,7 @@ class MainWindow(QMainWindow):
     def _cancel_generation_plan(self) -> None:
         """
         中止: 以降のユニットを送らず、未送信ユニットの履歴行を破棄し、
-        送信済み未受信の item を InvokeAI で個別キャンセルする。
+        送信済み未受信の item を Invoke で個別キャンセルする。
         キャンセルされた item は終端失敗となり、既存の同期機構が行を自動削除する。
         """
         import db.send_queue_db as _sq
@@ -3389,7 +3389,7 @@ class MainWindow(QMainWindow):
         self._show_status(tr("settings.history_windows_reset_done"))
 
     def _auto_open_invoke_setup_if_needed(self) -> None:
-        """モデルまたは生成テンプレートが未取得なら、InvokeAI セットアップへ誘導する。"""
+        """モデルまたは生成テンプレートが未取得なら、Invoke セットアップへ誘導する。"""
         has_model = _env_db.fetchone(
             "SELECT 1 FROM models WHERE type='main' AND available=1 LIMIT 1"
         ) is not None
@@ -3893,7 +3893,7 @@ class MainWindow(QMainWindow):
         self._status_conn.setStyleSheet(f"color: {RED};")
         self._status_queue.setText("")
 
-    # ── 履歴同期（InvokeAI → DB）非同期 ─────────────────────
+    # ── 履歴同期（Invoke → DB）非同期 ─────────────────────
 
     def _sync_history(self) -> None:
         """
@@ -5129,7 +5129,7 @@ class MainWindow(QMainWindow):
 
         画像の優先順:
           ① PromptMosaic 保存画像（local_path、100%表示）
-          ② InvokeAI の元画像（invoke_image_name を API 取得、100%表示）
+          ② Invoke の元画像（invoke_image_name を API 取得、100%表示）
           ③ 履歴サムネイル（実寸）
           ④ どれもない時は 100x100 グレー＋中央に「画像無し」
         画像ビューア側で拡大縮小するため、ここでは元画像のサイズを保つ。
@@ -6205,7 +6205,7 @@ class MainWindow(QMainWindow):
         model_name: str,
         loras: list,
     ) -> tuple[bool, set[str]]:
-        """InvokeAIメタデータを、現環境に存在する範囲で生成UIへ反映する。"""
+        """Invokeメタデータを、現環境に存在する範囲で生成UIへ反映する。"""
         model_applied = self._apply_invoke_meta_model(
             model_name,
             meta.get("model_base") or "",
@@ -6493,7 +6493,7 @@ class MainWindow(QMainWindow):
     def _apply_base_ui(self, base: str) -> None:
         """ベース種別に合わせてスケジューラーリストとデフォルトStepsを切り替える。
 
-        InvokeAI から取得済みの _scheduler_map を優先使用し、
+        Invoke から取得済みの _scheduler_map を優先使用し、
         未取得またはベース不明の場合はハードコードの _SCHEDULERS にフォールバック。
         """
         if hasattr(self, "_model_base_combo") and base:
@@ -7243,8 +7243,8 @@ class MainWindow(QMainWindow):
     def _refresh_models(self) -> None:
         """
         ツールバーの 🔄 ボタン用。
-        ModelBrowser / LoRABrowser の同期（InvokeAI → DB）を実行する。
-        スケジューラーリストも InvokeAI から再取得する。
+        ModelBrowser / LoRABrowser の同期（Invoke → DB）を実行する。
+        スケジューラーリストも Invoke から再取得する。
         """
         # スケジューラーマップを更新（非ブロッキング、失敗時は既存マップを維持）
         try:
@@ -7498,4 +7498,5 @@ class MainWindow(QMainWindow):
         self._client.close()
         close_all()
         super().closeEvent(event)
+
 

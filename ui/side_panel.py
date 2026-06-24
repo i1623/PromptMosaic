@@ -9,7 +9,7 @@
 
 サムネイル:
   generations.thumbnail_data BLOB を読み書きする。
-  未格納の場合は InvokeAI API から取得し、圧縮して DB に保存する。
+  未格納の場合は Invoke API から取得し、圧縮して DB に保存する。
 """
 from __future__ import annotations
 
@@ -2867,3 +2867,4 @@ class SidePanel(QWidget):
         if not raw.isdigit() or int(raw) <= 0:
             return
         self.enter_history_tile_mode(int(raw))
+

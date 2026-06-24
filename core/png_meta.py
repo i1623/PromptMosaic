@@ -2,7 +2,7 @@
 PNG metadata reader.
 
 Supported sources:
-  - InvokeAI: invokeai_metadata / invokeai / sd-metadata
+  - Invoke: invokeai_metadata / invokeai / sd-metadata
   - AUTOMATIC1111 / Forge: parameters
   - ComfyUI: prompt / workflow
   - NovelAI: Software=NovelAI, Description, Comment
@@ -265,7 +265,7 @@ def _looks_like_json_object(value: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────
-# InvokeAI
+# Invoke
 # ─────────────────────────────────────────────────────────────
 
 def _extract_invoke_json(text: dict[str, str]) -> dict | None:
@@ -975,3 +975,4 @@ def _get_nested(d, *keys):
         else:
             return None
     return cur
+

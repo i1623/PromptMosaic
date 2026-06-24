@@ -75,7 +75,7 @@ class _FetchTemplateWorker(QThread):
 
 
 class InvokeSetupDialog(QDialog):
-    """InvokeAI データ取得（接続→モデル/LoRA取得→ベース別テンプレート取得）。"""
+    """Invoke データ取得（接続→モデル/LoRA取得→ベース別テンプレート取得）。"""
 
     setup_changed = Signal()
     language_changed = Signal()
@@ -516,3 +516,4 @@ class InvokeSetupDialog(QDialog):
             tr("invoke_setup.close_notice_msg"),
         )
         super().reject()
+

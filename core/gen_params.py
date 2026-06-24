@@ -6,7 +6,7 @@
 
 現状の制御:
   - CFG ロック: flux2 は denoise が「真の cfg_scale」を持ち、1.0 以外だと
-    InvokeAI が negative text conditioning を要求する（txt2img テンプレートは
+    Invoke が negative text conditioning を要求する（txt2img テンプレートは
     ネガ経路を持たないため生成不可）。flux2 は蒸留ガイダンス(guidance)で制御する
     モデルなので、CFG は 1.0 固定・編集不可にする。
 """
@@ -22,3 +22,4 @@ LOCKED_CFG_VALUE: float = 1.0
 def cfg_is_locked(base: str | None) -> bool:
     """このベースでは CFG を固定値・編集不可にするか。"""
     return (base or "") in _CFG_LOCKED_BASES
+

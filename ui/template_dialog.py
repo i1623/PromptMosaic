@@ -2,7 +2,7 @@
 テンプレート関連ダイアログ
 
   - TemplateChooserDialog: モデル選択時、複数テンプレートから選ばせる
-  - FetchTemplateDialog:   InvokeAIから取得する際、新規/上書き/名前を指定
+  - FetchTemplateDialog:   Invokeから取得する際、新規/上書き/名前を指定
   - choose_template_for_model(): 外部から呼ぶヘルパー
 """
 from __future__ import annotations
@@ -112,7 +112,7 @@ def choose_template_for_model(
 
 
 class FetchTemplateDialog(QDialog):
-    """InvokeAIから取得する際の保存先指定ダイアログ。"""
+    """Invokeから取得する際の保存先指定ダイアログ。"""
 
     MODE_NEW = "new"
     MODE_OVERWRITE = "overwrite"
@@ -191,3 +191,4 @@ class FetchTemplateDialog(QDialog):
 
     def result_overwrite_id(self) -> int | None:
         return self._overwrite_combo.currentData() if self._rb_overwrite.isChecked() else None
+

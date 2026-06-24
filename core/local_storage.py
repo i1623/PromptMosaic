@@ -2,7 +2,7 @@
 ローカル画像ストレージ管理
 
 generation_groups.folder_path を親方向に辿って保存先を解決し、
-InvokeAI から取得した画像バイト列をコピーする。
+Invoke から取得した画像バイト列をコピーする。
 サムネイルは DB の BLOB として管理するため、このモジュールは扱わない。
 """
 from __future__ import annotations
@@ -104,3 +104,5 @@ def has_group_folder(group_id: int | None, db=None) -> bool:
             return True
         current_id = row["parent_id"]
     return False
+
+

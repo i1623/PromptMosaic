@@ -3,7 +3,7 @@
 
 生成パラメータの確認・評価・メモ記録を1画面で行う。
 サムネイルは DB の thumbnail_data BLOB を優先し、
-なければ InvokeAI API から取得・圧縮して DB に保存する。
+なければ Invoke API から取得・圧縮して DB に保存する。
 """
 from __future__ import annotations
 
@@ -217,7 +217,7 @@ class ReviewDialog(QDialog):
                     lora_parts = []
                     for lora in (loras_list or []):
                         if isinstance(lora, dict):
-                            # InvokeAI形式: {"lora": {"name": "..."}, "weight": 0.8}
+                            # Invoke形式: {"lora": {"name": "..."}, "weight": 0.8}
                             # または簡易形式: {"name": "...", "weight": 0.8}
                             name   = (lora.get("name") or
                                       (lora.get("lora") or {}).get("name") or
@@ -550,3 +550,4 @@ class ReviewDialog(QDialog):
     def was_saved(self) -> bool:
         """ダイアログを閉じる前にレビューが保存されたか"""
         return getattr(self, "_saved", False)
+

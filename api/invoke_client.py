@@ -1,5 +1,5 @@
 """
-InvokeAI APIクライアント
+Invoke APIクライアント
 
 対応エンドポイント:
   recall   : POST/GET /api/v1/recall/{queue_id}
@@ -28,7 +28,7 @@ _TEMPLATE_CACHE_PATH = Path(__file__).parent.parent / "data" / "template_cache.j
 
 
 class InvokeConnectionError(Exception):
-    """InvokeAIへの接続・通信エラー"""
+    """Invokeへの接続・通信エラー"""
 
 
 class TemplateBaseMismatch(Exception):
@@ -49,7 +49,7 @@ def _settings() -> dict[str, str]:
 
 class InvokeClient:
     """
-    InvokeAI REST APIのラッパークライアント。
+    Invoke REST APIのラッパークライアント。
 
     インスタンスはアプリ起動時に1つ作成し、使い回す想定。
     httpxのtimeoutはデフォルト10秒（画像取得時は別途設定）。
@@ -72,7 +72,7 @@ class InvokeClient:
             resp.raise_for_status()
             return resp.json()
         except httpx.ConnectError as e:
-            raise InvokeConnectionError(f"InvokeAIに接続できません: {self.endpoint}") from e
+            raise InvokeConnectionError(f"Invokeに接続できません: {self.endpoint}") from e
         except httpx.HTTPStatusError as e:
             raise InvokeConnectionError(f"HTTPエラー {e.response.status_code}: {url}") from e
         except httpx.TimeoutException as e:
@@ -85,7 +85,7 @@ class InvokeClient:
             resp.raise_for_status()
             return resp.content
         except httpx.ConnectError as e:
-            raise InvokeConnectionError(f"InvokeAIに接続できません: {self.endpoint}") from e
+            raise InvokeConnectionError(f"Invokeに接続できません: {self.endpoint}") from e
         except httpx.HTTPStatusError as e:
             raise InvokeConnectionError(f"HTTPエラー {e.response.status_code}: {url}") from e
         except httpx.TimeoutException as e:
@@ -98,7 +98,7 @@ class InvokeClient:
             resp.raise_for_status()
             return resp.json()
         except httpx.ConnectError as e:
-            raise InvokeConnectionError(f"InvokeAIに接続できません: {self.endpoint}") from e
+            raise InvokeConnectionError(f"Invokeに接続できません: {self.endpoint}") from e
         except httpx.HTTPStatusError as e:
             body = e.response.text if e.response.text else ""
             # コンソールにフルテキストを出力（デバッグ用）
@@ -132,7 +132,7 @@ class InvokeClient:
     # ------------------------------------------------------------------
 
     def ping(self) -> bool:
-        """InvokeAIが起動しているか確認する。True=OK, False or 例外=NG。"""
+        """Invokeが起動しているか確認する。True=OK, False or 例外=NG。"""
         try:
             self._get("/api/v1/queue/default/status")
             return True
@@ -149,7 +149,7 @@ class InvokeClient:
 
     def recall_post(self, positive_prompt: str, negative_prompt: str = "") -> dict:
         """
-        プロンプトをInvokeAIのキャンバスに即時反映する。
+        プロンプトをInvokeのキャンバスに即時反映する。
 
         Args:
             positive_prompt: 送信するポジティブプロンプト文字列
@@ -181,7 +181,7 @@ class InvokeClient:
         画像生成をキューに追加する（自動実行）。
 
         Args:
-            batch: InvokeAI enqueue_batch API形式のdict
+            batch: Invoke enqueue_batch API形式のdict
                    {"batch": {"graph": {...}, "runs": 1, ...}}
 
         Returns:
@@ -194,15 +194,15 @@ class InvokeClient:
         キューアイテムを1件キャンセルする。
 
         PromptMosaic が発行した item_id だけを個別にキャンセルする用途
-        （キュー全クリアは使わない＝InvokeAI 側で手動投入されたジョブを巻き込まない）。
-        完了済み・キャンセル済みアイテムへの呼び出しは InvokeAI 側で無害に処理される。
+        （キュー全クリアは使わない＝Invoke 側で手動投入されたジョブを巻き込まない）。
+        完了済み・キャンセル済みアイテムへの呼び出しは Invoke 側で無害に処理される。
         """
         url = f"{self.endpoint}/api/v1/queue/{self.queue_id}/i/{item_id}/cancel"
         try:
             resp = self._client.put(url, timeout=10.0)
             resp.raise_for_status()
         except httpx.ConnectError as e:
-            raise InvokeConnectionError(f"InvokeAIに接続できません: {self.endpoint}") from e
+            raise InvokeConnectionError(f"Invokeに接続できません: {self.endpoint}") from e
         except httpx.HTTPStatusError as e:
             raise InvokeConnectionError(f"HTTPエラー {e.response.status_code}: {url}") from e
         except httpx.TimeoutException as e:
@@ -210,7 +210,7 @@ class InvokeClient:
 
     @staticmethod
     def _batch_field_node_ids(nodes: dict) -> tuple[str | None, str | None]:
-        """InvokeAI batch data で差し替える positive prompt / seed ノードIDを探す。"""
+        """Invoke batch data で差し替える positive prompt / seed ノードIDを探す。"""
         prompt_node_id: str | None = None
         seed_node_id: str | None = None
         for node_id, node in nodes.items():
@@ -255,7 +255,7 @@ class InvokeClient:
         画像のメタデータ（生成パラメータ等）を取得する。
 
         Args:
-            image_name: InvokeAI側の画像名（例: "abc123.png"）
+            image_name: Invoke側の画像名（例: "abc123.png"）
         """
         return self._get(f"/api/v1/images/i/{image_name}/metadata")
 
@@ -280,7 +280,7 @@ class InvokeClient:
         return self._post("/api/v1/boards/", params={"board_name": name})
 
     def boards_list(self, include_archived: bool = False, limit: int = 100) -> list[dict]:
-        """InvokeAI のボード一覧を取得する。"""
+        """Invoke のボード一覧を取得する。"""
         data = self._get(
             "/api/v1/boards/",
             params={"limit": limit, "offset": 0, "include_archived": include_archived},
@@ -292,7 +292,7 @@ class InvokeClient:
         return []
 
     def board_get(self, board_id: str) -> dict:
-        """InvokeAI のボード詳細を取得する。"""
+        """Invoke のボード詳細を取得する。"""
         return self._get(f"/api/v1/boards/{board_id}")
 
     def board_add_image(self, board_id: str, image_name: str) -> dict:
@@ -315,7 +315,7 @@ class InvokeClient:
             {"models": [...]}  ※v2 APIは "items" ではなく "models" キーを使う
 
         Note:
-            InvokeAI 6.13 でクエリパラメータ名が変更された。
+            Invoke 6.13 でクエリパラメータ名が変更された。
             旧: type / base  →  新: model_type / base_models
             旧パラメータを送ると 0 件が返るため必ず新名称を使う。
         """
@@ -336,7 +336,7 @@ class InvokeClient:
 
     def fetch_scheduler_map(self) -> dict[str, list[str]]:
         """
-        InvokeAI の OpenAPI 仕様を解析し、ノードタイプ別スケジューラーリストを返す。
+        Invoke の OpenAPI 仕様を解析し、ノードタイプ別スケジューラーリストを返す。
 
         専用エンドポイントが存在しないため /openapi.json から動的に取得する。
         スキーマの scheduler プロパティに enum が定義されているノードを自動収集。
@@ -472,7 +472,7 @@ class InvokeClient:
           モデルローダー (汎用)   : type に "model_loader" を含む → model.key を更新
           core_metadata           : type=core_metadata
                                     ※ フィールドの存在チェックで各モデルに汎用対応
-                                    ※ core_metadata を更新しないと InvokeAI が前回 GUI 値を使い回すバグがある
+                                    ※ core_metadata を更新しないと Invoke が前回 GUI 値を使い回すバグがある
 
         Returns:
             True if positive_prompt node was found and replaced.
@@ -574,7 +574,7 @@ class InvokeClient:
                         node["cfg_scale"] = cfg_scale
                     elif "guidance" in node:
                         node["guidance"] = cfg_scale
-                # scheduler: モデルによって受付値を制限（InvokeAI OpenAPI仕様に基づく）
+                # scheduler: モデルによって受付値を制限（Invoke OpenAPI仕様に基づく）
                 if scheduler is not None and "scheduler" in node:
                     if ntype in ("flux_denoise", "flux2_denoise", "z_image_denoise"):
                         # flux / flux2 / z-image は euler/heun/lcm のみ
@@ -597,7 +597,7 @@ class InvokeClient:
 
             # ── core_metadata（汎用）────────────────────────────────────────────
             # フィールドの存在チェックで各モデルに対応（ベース別分岐不要）
-            # 省略すると InvokeAI が前回の GUI 値をフォールバックとして使うため必ず更新する
+            # 省略すると Invoke が前回の GUI 値をフォールバックとして使うため必ず更新する
             elif ntype == "core_metadata":
                 node["positive_prompt"] = positive_prompt
                 node["seed"] = seed
@@ -624,7 +624,7 @@ class InvokeClient:
                         **(node.get("model") or {}),
                         **model_identifier,
                     }
-                # LoRA 情報を core_metadata に書き込む（InvokeAI の画像パラメータ表示用）
+                # LoRA 情報を core_metadata に書き込む（Invoke の画像パラメータ表示用）
                 # CoreMetadataInvocation.loras は nullable・任意フィールドのため
                 # テンプレートに元々存在しなくても追加可能（OpenAPI 6.13.0.rc2 確認済み）
                 # hash は ModelIdentifierField の required フィールド。
@@ -669,7 +669,7 @@ class InvokeClient:
         複数枚生成する場合は generate_batch() を使うこと（テンプレート取得が1回で済む）。
 
         Args:
-            model_key: InvokeAI モデルの UUID キー。None のとき既存グラフのモデルをそのまま使う。
+            model_key: Invoke モデルの UUID キー。None のとき既存グラフのモデルをそのまま使う。
 
         Raises:
             InvokeConnectionError: 接続失敗 / テンプレートが見つからない
@@ -678,7 +678,7 @@ class InvokeClient:
         if item_id is None:
             raise InvokeConnectionError(
                 "テンプレートとなる完了済みジョブが見つかりません。"
-                "InvokeAIで一度手動生成してください。"
+                "Invokeで一度手動生成してください。"
             )
 
         item  = self.get_queue_item(item_id)
@@ -721,7 +721,7 @@ class InvokeClient:
         """グラフからベースモデル種別を推定する。
 
         汎用化: *_model_loader 系ノードの model.base フィールドを読む。
-        InvokeAI の命名規則に従う限り、新モデルはコード変更なしで自動対応。
+        Invoke の命名規則に従う限り、新モデルはコード変更なしで自動対応。
         flux2 のみエンコーダーキーで cache_key を分岐するため個別判定を残す。
         """
         for node in nodes.values():
@@ -911,7 +911,7 @@ class InvokeClient:
         LoRA で in-place 置き換える。
         collector / collection_loader / それらに繋がる全エッジはそのまま保持する。
 
-        InvokeAI Canvas モードでは model_loader の passthrough エッジが
+        Invoke Canvas モードでは model_loader の passthrough エッジが
         グラフに存在しないことがあり、_strip_lora_nodes で復元できない。
         このメソッドは selector ノードと lora→collector エッジのみを差し替え、
         その他の接続（model_loader→collection_loader等）を一切変更しないため
@@ -1175,7 +1175,7 @@ class InvokeClient:
         return cur.lastrowid
 
     def fetch_template_graph(self, expected_base: str | None = None) -> dict:
-        """InvokeAI の最新完了ジョブの txt2img グラフを取得して返す（保存はしない）。
+        """Invoke の最新完了ジョブの txt2img グラフを取得して返す（保存はしない）。
         中身の評価はせずベースだけ確認する。命名はこの後 UI 側で行い save_fetched_template で保存。
 
         Returns: {"graph": dict, "base": str}
@@ -1187,14 +1187,14 @@ class InvokeClient:
         if item_id is None:
             raise InvokeConnectionError(
                 "テンプレートにできる生成が見つかりません。\n"
-                "InvokeAI で一度画像を生成してください。"
+                "Invoke で一度画像を生成してください。"
             )
         item = self.get_queue_item(item_id)
         graph = item["session"]["graph"]
         if not self._is_txt2img_graph(graph):
             raise InvokeConnectionError(
-                "最新の InvokeAI の生成は txt2img ではありません。\n"
-                "InvokeAI で txt2img 生成を1回行ってから再度お試しください。"
+                "最新の Invoke の生成は txt2img ではありません。\n"
+                "Invoke で txt2img 生成を1回行ってから再度お試しください。"
             )
         base = self._detect_base(graph.get("nodes", {}))
         if expected_base is not None and base != expected_base:
@@ -1205,7 +1205,7 @@ class InvokeClient:
             raise InvokeConnectionError(
                 "直近の生成に LoRA が含まれていません。\n"
                 "PromptMosaic は取得するテンプレートの LoRA 経路を見本にするため、\n"
-                "InvokeAI で LoRA を1つ以上使って画像を生成してから、再度取得してください。"
+                "Invoke で LoRA を1つ以上使って画像を生成してから、再度取得してください。"
             )
         return {"graph": graph, "base": base}
 
@@ -1285,7 +1285,7 @@ class InvokeClient:
 
     @staticmethod
     def _extract_model_invoke_key(graph: dict) -> str | None:
-        """グラフ内のモデルローダーノードから InvokeAI モデルの invoke_key を取得する。
+        """グラフ内のモデルローダーノードから Invoke モデルの invoke_key を取得する。
         汎用化: "model_loader" を含み "lora" を含まない型名で検出。
         """
         for node in graph.get("nodes", {}).values():
@@ -1493,7 +1493,7 @@ class InvokeClient:
                 print(
                     f"[PromptMosaic] flux2 テンプレートが複数存在します: "
                     f"{[c.name for c in candidates]}。"
-                    "InvokeAI でそのモデルを使って1枚生成してから再試行してください。",
+                    "Invoke でそのモデルを使って1枚生成してから再試行してください。",
                     file=sys.stderr, flush=True,
                 )
                 return None
@@ -1524,12 +1524,12 @@ class InvokeClient:
         テンプレート解決:
           - template_id が指定されていれば、DBの templates.cache_key から
             対応するファイル（data/template_cache_{cache_key}.json）を読み込んで使用する。
-            InvokeAI の最新ジョブは参照しない（保存済みテンプレートが変わらない方が安心）。
-          - template_id が None の場合は旧互換動作（InvokeAI の最新ジョブを取得、
+            Invoke の最新ジョブは参照しない（保存済みテンプレートが変わらない方が安心）。
+          - template_id が None の場合は旧互換動作（Invoke の最新ジョブを取得、
             txt2img なら保存、Canvas/img2img なら既存キャッシュを使用）。
 
         Args:
-            model_key:   InvokeAI モデルの UUID キー。None のとき既存グラフのモデルをそのまま使う。
+            model_key:   Invoke モデルの UUID キー。None のとき既存グラフのモデルをそのまま使う。
             loras:       LoRAリスト [{"invoke_key", "name", "base", "weight", "enabled"}, ...]。
                          None のとき LoRA なし（テンプレートのLoRAも除去して直結）。
             template_id: DB templates.id。指定時はそのテンプレートを使用する。
@@ -1602,7 +1602,7 @@ class InvokeClient:
                 else:
                     raise InvokeConnectionError(
                         f"テンプレート「{tmpl_name}」（base={expected_base}）の修復に失敗しました。\n"
-                        f"InvokeAI で {expected_base} モデルを使って txt2img を1枚生成してから、\n"
+                        f"Invoke で {expected_base} モデルを使って txt2img を1枚生成してから、\n"
                         "テンプレート編集画面で「現在のグラフを取得」を実行してください。"
                     )
             else:
@@ -1613,12 +1613,12 @@ class InvokeClient:
                 file=sys.stderr, flush=True,
             )
         else:
-            # 旧互換: InvokeAI から取得して自動保存
+            # 旧互換: Invoke から取得して自動保存
             item_id = self.get_latest_item_id()
             if item_id is None:
                 raise InvokeConnectionError(
                     "テンプレートとなる完了済みジョブが見つかりません。"
-                    "InvokeAIで一度手動生成してください。"
+                    "Invokeで一度手動生成してください。"
                 )
 
             item = self.get_queue_item(item_id)
@@ -1647,7 +1647,7 @@ class InvokeClient:
                     print(
                         "[PromptMosaic] 警告: Canvas/img2img テンプレートですがキャッシュが"
                         "ありません。そのまま使用します（noise/latents サイズ不一致の"
-                        "可能性があります）。InvokeAI で通常の txt2img を一度実行してください。",
+                        "可能性があります）。Invoke で通常の txt2img を一度実行してください。",
                         file=sys.stderr, flush=True,
                     )
 
@@ -1666,7 +1666,7 @@ class InvokeClient:
 
         # LoRA の hash を DB から補完する
         # LoRAbar に保存された古いデータや履歴からの復元では hash が欠落している場合がある。
-        # ModelIdentifierField.hash は InvokeAI の required フィールドのため、
+        # ModelIdentifierField.hash は Invoke の required フィールドのため、
         # ここで invoke_key をキーに models テーブルから invoke_hash を取得して補完する。
         if loras:
             enriched: list[dict] = []
@@ -1815,3 +1815,4 @@ class InvokeClient:
 
     def __exit__(self, *_):
         self.close()
+

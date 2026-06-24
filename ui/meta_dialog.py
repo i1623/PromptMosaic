@@ -1,7 +1,7 @@
 """
 PNGメタデータ表示ダイアログ
 
-InvokeAI生成PNGのメタデータを表示し、エディタへのロードを提供する。
+Invoke生成PNGのメタデータを表示し、エディタへのロードを提供する。
 """
 from __future__ import annotations
 
@@ -214,7 +214,7 @@ class MetaDialog(QDialog):
 
 def _source_format_label(source_format: str) -> str:
     labels = {
-        "invokeai": "InvokeAI",
+        "invokeai": "Invoke",
         "a1111": "AUTOMATIC1111 / Forge",
         "comfyui": "ComfyUI",
         "comfyui_webp": "ComfyUI WebP",
@@ -222,3 +222,4 @@ def _source_format_label(source_format: str) -> str:
         "chatgpt_c2pa": "ChatGPT / GPT-4o C2PA",
     }
     return labels.get(source_format, source_format or "—")
+

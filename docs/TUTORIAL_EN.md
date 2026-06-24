@@ -2,7 +2,7 @@
 
 [Japanese](TUTORIAL.md) | [English](TUTORIAL_EN.md)
 
-This tutorial walks first-time users through installing **PromptMosaic**, connecting it to InvokeAI, and generating the first image.
+This tutorial walks first-time users through installing **PromptMosaic**, connecting it to Invoke, and generating the first image.
 For detailed feature descriptions, see the [Manual](MANUAL_EN.md).
 
 > Screenshot placeholder: full main window immediately after launch
@@ -15,7 +15,7 @@ For detailed feature descriptions, see the [Manual](MANUAL_EN.md).
 1. [What PromptMosaic Is](#1-what-promptmosaic-is)
 2. [Requirements](#2-requirements)
 3. [Install and Launch](#3-install-and-launch)
-4. [Connect to InvokeAI](#4-connect-to-invokeai)
+4. [Connect to Invoke](#4-connect-to-invoke)
 5. [Main Window Layout](#5-main-window-layout)
 6. [Build the First Prompt](#6-build-the-first-prompt)
 7. [Choose Model and Parameters](#7-choose-model-and-parameters)
@@ -27,18 +27,18 @@ For detailed feature descriptions, see the [Manual](MANUAL_EN.md).
 
 ## 1. What PromptMosaic Is
 
-PromptMosaic is a companion GUI for InvokeAI. It was built around editing English prompts while showing local-language labels, such as Japanese translations, side by side.
+PromptMosaic is a companion GUI for Invoke. It was built around editing English prompts while showing local-language labels, such as Japanese translations, side by side.
 
 - Manage prompts as reusable **tiles**.
-- Use PromptMosaic side by side with InvokeAI, with the InvokeAI viewer on one side and prompt editing, history, and regeneration controls on the other.
+- Use PromptMosaic side by side with Invoke, with the Invoke viewer on one side and prompt editing, history, and regeneration controls on the other.
 - View English prompt text and local-language labels together.
 - Use a translation LLM such as LM Studio to turn words or sentences in your language into English prompt tiles.
 - Organize tags, prompt text, and tile groups.
-- Send generation jobs to InvokeAI.
+- Send generation jobs to Invoke.
 - Review generation history and branch from past results.
 - Run multiple models and LoRAs through multi-model plans.
 
-PromptMosaic itself does not generate images. InvokeAI must be running and reachable from the local machine.
+PromptMosaic itself does not generate images. Invoke must be running and reachable from the local machine.
 
 ---
 
@@ -46,8 +46,8 @@ PromptMosaic itself does not generate images. InvokeAI must be running and reach
 
 - Windows 11
 - Python 3.11 from python.org, or the Windows `py` launcher
-- InvokeAI 6.13 or later
-- A model that can generate images in InvokeAI
+- Invoke 6.13 or later
+- A model that can generate images in Invoke
 
 Conda / Anaconda Python is not required. If Conda is installed, use the included installer and launcher so PromptMosaic can use its own normal virtual environment without being affected by Conda DLL paths.
 The installer searches for Python 3.11, then 3.12, then 3.10, but the public installation guide uses Python 3.11 as the recommended baseline.
@@ -121,17 +121,17 @@ For later launches, use `PromptMosaic.bat`, not `install_windows.bat`.
 
 ---
 
-## 4. Connect to InvokeAI
+## 4. Connect to Invoke
 
-Start InvokeAI 6.13 or later before running the first setup.
+Start Invoke 6.13 or later before running the first setup.
 
-On first launch, PromptMosaic opens the **InvokeAI Data Acquisition** wizard.
+On first launch, PromptMosaic opens the **Invoke Data Acquisition** wizard.
 
-![InvokeAI Data Acquisition wizard](images/invoke_setup_starting.png)
+![Invoke Data Acquisition wizard](images/invoke_setup_starting.png)
 
 ### Step 1: Fetch Models and LoRAs
 
-Confirm the InvokeAI URL, normally:
+Confirm the Invoke URL, normally:
 
 ```text
 http://localhost:9090
@@ -145,11 +145,11 @@ After models and LoRAs are fetched, rows for each base model appear. At first, t
 
 ### Step 2: Fetch Generation Templates for Each Base Model
 
-A generation template is the actual txt2img workflow graph saved from InvokeAI. PromptMosaic reuses the graph and only replaces known fields such as prompt, seed, steps, CFG, scheduler, model, and size.
+A generation template is the actual txt2img workflow graph saved from Invoke. PromptMosaic reuses the graph and only replaces known fields such as prompt, seed, steps, CFG, scheduler, model, and size.
 
 For each base model you want to use:
 
-1. In InvokeAI, generate one txt2img image with that base model.
+1. In Invoke, generate one txt2img image with that base model.
 2. If you plan to use LoRA, include at least one LoRA in that generation. PromptMosaic uses the LoRA path in the workflow as a reusable route.
 3. In PromptMosaic, fetch and save the template from the wizard.
 
@@ -165,7 +165,7 @@ When the templates you need are listed, setup is complete for those base models.
 
 ![Multiple templates fetched](images/invoke_setup_templates_complete.png)
 
-If you try to generate with a base model that has no template, PromptMosaic shows a message that the template is missing. Generate an image with that base model in InvokeAI, then fetch the template in this wizard.
+If you try to generate with a base model that has no template, PromptMosaic shows a message that the template is missing. Generate an image with that base model in Invoke, then fetch the template in this wizard.
 
 ![Missing template message](images/invoke_setup_missing_template.png)
 
@@ -205,11 +205,11 @@ On a fresh install, the tag browser may be empty. In that case, start from the c
    - Adjust emphasis when needed.
 6. Add negative prompt tiles in the **Negative** block in the same way.
 
-### Method B: Start from an InvokeAI Image
+### Method B: Start from an Invoke Image
 
-If you already have a PNG / WebP generated by InvokeAI, drop it into the PromptMosaic center pane. When supported metadata is found, PromptMosaic can load the positive and negative prompts into tiles.
+If you already have a PNG / WebP generated by Invoke, drop it into the PromptMosaic center pane. When supported metadata is found, PromptMosaic can load the positive and negative prompts into tiles.
 
-This can be the fastest way to start when you already have an InvokeAI image you want to continue from.
+This can be the fastest way to start when you already have an Invoke image you want to continue from.
 
 ### Optional Translation
 
@@ -256,7 +256,7 @@ Use the generation buttons:
 - **Generate All** - generate all configured targets in the current plan.
 - **Enqueue / plan buttons** - use configured multi-model plan behavior when available.
 
-PromptMosaic sends the job to InvokeAI. When the image is ready, it appears in the history area.
+PromptMosaic sends the job to Invoke. When the image is ready, it appears in the history area.
 
 > Screenshot placeholder: first result visible in the right pane
 > `docs/images/first_result.png`
@@ -292,3 +292,4 @@ After the first successful generation, try:
 - Backing up your work by copying the entire `data` folder.
 
 For complete details, continue with the [Manual](MANUAL_EN.md).
+

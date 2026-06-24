@@ -5,7 +5,7 @@
 This document is a feature-by-feature reference for PromptMosaic.
 If you are using PromptMosaic for the first time, read the [Tutorial](TUTORIAL_EN.md) first.
 
-> Target version: **1.4.2** / Target InvokeAI: **6.13 or later**
+> Target version: **1.4.2** / Target Invoke: **6.13 or later**
 
 ---
 
@@ -31,7 +31,7 @@ If you are using PromptMosaic for the first time, read the [Tutorial](TUTORIAL_E
 
 | Term | Meaning |
 | --- | --- |
-| Prompt | The text sent to InvokeAI for image generation |
+| Prompt | The text sent to Invoke for image generation |
 | Tile | A reusable prompt piece such as a tag, word, or sentence |
 | Bilingual display | A core PromptMosaic workflow: show English prompt text and local-language labels side by side |
 | Translation assistance | Optional local LLM integration, such as LM Studio, for turning words or sentences in your language into English prompt tiles |
@@ -40,7 +40,7 @@ If you are using PromptMosaic for the first time, read the [Tutorial](TUTORIAL_E
 | Prompt text | A longer sentence or paragraph stored for reuse |
 | Generation history | Stored generation results, prompts, parameters, and thumbnails |
 | History map | A lineage view showing how generations branched from earlier results |
-| Generation template | An InvokeAI txt2img workflow graph saved as the base for future jobs |
+| Generation template | An Invoke txt2img workflow graph saved as the base for future jobs |
 | Multi-model plan | A sequence of models, LoRAs, and parameters used for repeated generation |
 
 PromptMosaic is built around bilingual prompt editing, reusable prompt parts, and visible generation lineage. The goal is to make experimentation repeatable without losing either the English prompt text or the local-language meaning.
@@ -81,13 +81,13 @@ Main operations:
 
 ### Model Browser
 
-The model browser lists models fetched from InvokeAI. You can select the base model for generation and check model information.
+The model browser lists models fetched from Invoke. You can select the base model for generation and check model information.
 
-If the model list is empty, open the InvokeAI Data Acquisition wizard and fetch environment data again.
+If the model list is empty, open the Invoke Data Acquisition wizard and fetch environment data again.
 
 ### LoRA Browser
 
-The LoRA browser lists LoRAs fetched from InvokeAI.
+The LoRA browser lists LoRAs fetched from Invoke.
 
 Typical use:
 
@@ -130,13 +130,13 @@ Common operations:
 
 In the block input field, comma-separated text such as `masterpiece, 1girl, blue eyes:1.2` creates multiple tag tiles. **Add Text** keeps the input as one natural text tile instead of splitting it.
 
-Disabled tiles remain visible but are not sent to InvokeAI.
+Disabled tiles remain visible but are not sent to Invoke.
 
 ### Translation
 
 PromptMosaic can use an optional local LLM server, such as LM Studio, for translation.
 
-Translation can help keep local-language labels and InvokeAI prompt text aligned. Configure the translation LLM in settings before using this feature.
+Translation can help keep local-language labels and Invoke prompt text aligned. Configure the translation LLM in settings before using this feature.
 
 ---
 
@@ -148,7 +148,7 @@ The generation bar controls the model and generation parameters.
 
 Choose the target model or base model before generating.
 
-Generation requires a template for the selected base model. If no template exists, PromptMosaic disables generation and asks you to fetch a template from InvokeAI.
+Generation requires a template for the selected base model. If no template exists, PromptMosaic disables generation and asks you to fetch a template from Invoke.
 
 ### Generation Parameters
 
@@ -161,7 +161,7 @@ Typical parameters include:
 - Positive / negative prompt
 - Optional LoRAs
 
-PromptMosaic patches known fields into the saved InvokeAI workflow graph. Unknown fields are left untouched, which helps templates survive many InvokeAI-side workflow changes.
+PromptMosaic patches known fields into the saved Invoke workflow graph. Unknown fields are left untouched, which helps templates survive many Invoke-side workflow changes.
 
 ### Seed Settings
 
@@ -182,7 +182,7 @@ The exact buttons depend on the selected mode and plan, but the generation contr
 - Plan or batch generation.
 - Reusing / branching from an existing history state.
 
-If a button is disabled, check the status message. Common causes are missing templates, an empty prompt, no selected model, or InvokeAI being disconnected.
+If a button is disabled, check the status message. Common causes are missing templates, an empty prompt, no selected model, or Invoke being disconnected.
 
 ---
 
@@ -284,23 +284,23 @@ Plans can also be managed from **Settings -> Generation Management -> Multi-Mode
 
 ## Generation Templates
 
-A template is the actual InvokeAI txt2img workflow graph. PromptMosaic stores the graph and, at generation time, replaces only known fields such as prompt, seed, steps, CFG, scheduler, model, and size.
+A template is the actual Invoke txt2img workflow graph. PromptMosaic stores the graph and, at generation time, replaces only known fields such as prompt, seed, steps, CFG, scheduler, model, and size.
 
 ### Fetching Templates
 
-- Use the **InvokeAI Data Acquisition** wizard. It opens automatically on first launch and can also be opened from settings.
+- Use the **Invoke Data Acquisition** wizard. It opens automatically on first launch and can also be opened from settings.
 
 ### Behavior and Notes
 
 - At least one template is required for each base model you want to generate with.
 - Multiple templates can be registered for the same base model, and one can be marked as the default.
-- When fetching a template for LoRA use, first create an InvokeAI txt2img generation that includes at least one LoRA. PromptMosaic reuses that LoRA route.
+- When fetching a template for LoRA use, first create an Invoke txt2img generation that includes at least one LoRA. PromptMosaic reuses that LoRA route.
 - VAE, refiner, and text encoder differences should be distinguished by template name.
 - SDXL refiner stages stored inside the template are preserved. PromptMosaic mainly patches the base stage.
-- Many minor InvokeAI workflow changes can be handled by fetching a fresh template.
+- Many minor Invoke workflow changes can be handled by fetching a fresh template.
 - Template management supports duplicate, rename, set as default, delete, and template cache reset.
 
-> Templates from another old InvokeAI environment are not guaranteed to work. Fetch templates from your current InvokeAI environment.
+> Templates from another old Invoke environment are not guaranteed to work. Fetch templates from your current Invoke environment.
 
 ---
 
@@ -322,7 +322,7 @@ Open settings with the gear button.
 
 ### Connection
 
-- **InvokeAI URL** - default `http://localhost:9090`.
+- **Invoke URL** - default `http://localhost:9090`.
 - **Queue ID** - default `default`.
 - **Translation LLM / classification LLM** - URL, model, prompts, temperature, and seed for LM Studio or another compatible local LLM server.
 
@@ -334,7 +334,7 @@ Open settings with the gear button.
 ### Templates
 
 - List, duplicate, rename, set default, and delete registered templates.
-- Fetch new templates from the **InvokeAI Data Acquisition** wizard.
+- Fetch new templates from the **Invoke Data Acquisition** wizard.
 
 ### Data Management
 
@@ -406,7 +406,7 @@ The external inbox imports history candidates from other tools. If items exist, 
 
 ### PNG Metadata Import
 
-Dropping a PNG into the app can import prompts from InvokeAI-style metadata such as `invokeai_metadata`, `invokeai`, or `sd-metadata`.
+Dropping a PNG into the app can import prompts from Invoke-style metadata such as `invokeai_metadata`, `invokeai`, or `sd-metadata`.
 
 ### Database Layout
 
@@ -419,8 +419,8 @@ Data is split across multiple SQLite databases under `data/`, including `app.db`
 | Virtual environment not found | Run `install_windows.bat` first |
 | Qt DLL error | Avoid Conda / Anaconda Python and recreate `.venv` with python.org Python |
 | Generate button is disabled | Fetch a template, select a model or plan, and make sure the prompt is not empty |
-| InvokeAI disconnected | Start InvokeAI 6.13 or later and check Settings -> Connection URL / queue ID |
-| Template fetch fails | In InvokeAI, generate one txt2img image using a LoRA, then fetch the template |
+| Invoke disconnected | Start Invoke 6.13 or later and check Settings -> Connection URL / queue ID |
+| Template fetch fails | In Invoke, generate one txt2img image using a LoRA, then fetch the template |
 
 Status indicators: connected, disconnected, and checking.
 
@@ -431,3 +431,4 @@ Status indicators: connected, disconnected, and checking.
 - [README](../README_EN.md)
 - [Tutorial](TUTORIAL_EN.md)
 - [Screenshot placeholders](images/README_EN.md)
+

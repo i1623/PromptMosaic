@@ -1,4 +1,4 @@
-"""InvokeAI / Compel-style prompt parsing helpers."""
+"""Invoke / Compel-style prompt parsing helpers."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,7 +14,7 @@ class _Weight:
 
 
 def parse_invoke_prompt(prompt: str) -> list:
-    """Parse an InvokeAI prompt into PromptMosaic tiles.
+    """Parse an Invoke prompt into PromptMosaic tiles.
 
     The parser keeps Invoke emphasis semantics as tile state instead of literal
     prompt text: trailing + / - becomes strength_level, and numeric
@@ -183,3 +183,5 @@ def _unquote(text: str) -> str:
     if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
         return text[1:-1].strip()
     return text
+
+
