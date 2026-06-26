@@ -17,10 +17,11 @@ from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QProgressBar, QMessageBox,
 )
 from PySide6.QtCore import Signal, Qt, QTimer, QPoint, QThread
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QColor
 
 from core.prompt_builder import PromptDocument, TagTile, NaturalTextTile, GroupTile, BlockType, BlockPosition
 from core.i18n import tr
+from core.lm_settings import DEFAULT_CLASSIFY_PROMPT, lm_seed, lm_temperature
 from core.text_sanitize import single_line_text
 from api.lm_client import LMClient, LMStudioError, translation_fallback_from_thinking
 import db.app_db as _app_db
@@ -44,12 +45,13 @@ def _get_setting(key: str, default: str = "") -> str:
     return row["value"] if row else default
 
 
-_DEFAULT_CLASSIFY_PROMPT = (
-    "You classify local PromptMosaic prompt/tile items into exactly one category. "
-    "Return strict JSON only. Use one category key from the provided list. "
-    "Also decide whether the prompt/tile item is NSFW. "
-    "Output schema: {\"category\":\"<key>\",\"is_nsfw\":false}."
-)
+def _readable_text_color(bg_hex: str) -> str:
+    color = QColor(bg_hex)
+    if not color.isValid():
+        return TEXT
+    r, g, b, _ = color.getRgb()
+    luminance = 0.299 * r + 0.587 * g + 0.114 * b
+    return "#cdd6f4" if luminance < 120 else "#1e1e2e"
 
 
 class _AutoClassifyWorker(QThread):
@@ -780,12 +782,13 @@ class PromptEditor(QWidget):
             db = str(item.get("history_db") or "")
             gid = int(item.get("history_id") or 0)
             color = str(item.get("color") or SURFACE2)
+            fg = _readable_text_color(color)
             btn = QToolButton()
             btn.setText(f"#{gid}")
             btn.setFixedHeight(24)
             btn.setToolTip(tr("history_map.stack_button_tooltip", n=gid))
             btn.setStyleSheet(
-                f"QToolButton {{ background: {color}; color: {TEXT}; border: 1px solid {ACCENT}; "
+                f"QToolButton {{ background: {color}; color: {fg}; border: 1px solid {ACCENT}; "
                 f"border-radius: 3px; padding: 0 6px; }}"
                 f"QToolButton:hover {{ border-color: {TEXT}; }}"
             )
@@ -1102,22 +1105,16 @@ class PromptEditor(QWidget):
         dlg.exec()
 
     def _auto_classify_settings(self) -> dict:
-        provider = _get_setting("lm_classify_provider", "") or _get_setting("lm_provider", "lmstudio")
-        endpoint = _get_setting("lm_classify_endpoint", "") or _get_setting("lm_endpoint", "http://localhost:1234")
+        provider = "lmstudio"
+        endpoint = _get_setting("lm_endpoint", "http://localhost:1234")
         model = _get_setting("lm_classify_model", "") or _get_setting("lm_translate_model", "")
-        try:
-            seed = int(_get_setting("lm_classify_seed", "0"))
-        except ValueError:
-            seed = 0
-        try:
-            temperature = float(_get_setting("lm_classify_temperature", "0"))
-        except ValueError:
-            temperature = 0.0
+        seed = lm_seed()
+        temperature = lm_temperature()
         try:
             chunk_timeout = float(_get_setting("lm_chunk_timeout", "60"))
         except ValueError:
             chunk_timeout = 60.0
-        prompt = _get_setting("lm_classify_prompt", "") or _DEFAULT_CLASSIFY_PROMPT
+        prompt = _get_setting("lm_classify_prompt", "") or DEFAULT_CLASSIFY_PROMPT
         return {
             "provider": provider,
             "endpoint": endpoint,

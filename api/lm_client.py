@@ -697,9 +697,9 @@ class LMClient:
         text: str,
         system_prompt: str,
         model: str = "",
-        temperature: float = 0.0,
+        temperature: float = 0.3,
         max_tokens: int = 1024,
-        seed: int | None = 0,
+        seed: int | None = 1,
         cancel_flag: list[bool] | None = None,
     ) -> Generator[Event, None, None]:
         """Stream a short classification response with deterministic settings when supported."""

@@ -30,6 +30,7 @@ import db.library_db as _library_db
 from api.lm_client import LMClient, LMStudioError, translation_fallback_from_thinking
 from core.prompt_builder import TagTile, NaturalTextTile, AnyTile
 from core.i18n import tr
+from core.lm_settings import lm_seed, lm_temperature
 from core.text_sanitize import single_line_text
 from ui.styles import get_tile_style, tag_browser_chip_colors, is_light_theme, SURFACE0, SURFACE1, SURFACE2, TEXT, SUBTEXT, RED, ui_font
 
@@ -281,7 +282,9 @@ class _TileTranslateWorker(QThread):
                 self._text,
                 self._system_prompt,
                 self._model,
+                temperature=lm_temperature(),
                 cancel_flag=self._cancel,
+                seed=lm_seed(),
             ):
                 if self._cancel[0]:
                     return

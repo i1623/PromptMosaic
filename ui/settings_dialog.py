@@ -4,6 +4,7 @@
 タブ構成:
   - 表示 (Appearance): 言語 / テーマ / フォントサイズ / タイル表示 / NSFW / アイコン
   - 接続 (Connection): Invoke URL / キューID
+  - LM Studio: 翻訳モデル / 翻訳プロンプト / 自動分類
   - 生成管理 (Generation): Invokeテンプレート管理 / マルチモデルプラン
   - データ (Data): バックアップ案内 / キャッシュ管理
 
@@ -13,6 +14,7 @@ URL / キューID は client にも即時反映する。
 """
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
@@ -20,16 +22,19 @@ from PySide6.QtWidgets import (
     QLabel, QComboBox, QLineEdit, QPushButton, QFormLayout,
     QSizePolicy, QCheckBox, QFileDialog, QTableWidget, QTableWidgetItem,
     QHeaderView, QMessageBox, QInputDialog, QAbstractItemView,
-    QGroupBox, QScrollArea, QApplication,
-    QColorDialog, QGridLayout,
+    QGroupBox, QScrollArea, QApplication, QAbstractScrollArea,
+    QColorDialog, QGridLayout, QDoubleSpinBox, QSpinBox, QTextEdit,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QBrush
 
 
+from api.lm_client import LMClient
 import db.app_db as _app_db
 import db.env_db as _env_db
+import ui.styles as _theme
 from core.i18n import tr, available_languages
+from core.lm_settings import DEFAULT_CLASSIFY_PROMPT, DEFAULT_LM_SEED, DEFAULT_LM_TEMPERATURE
 from ui.styles import (
     SURFACE0, SURFACE1, SURFACE2, TEXT, SUBTEXT, ACCENT, GREEN, RED, ui_font,
     history_default_text_color, history_default_line_color,
@@ -59,13 +64,35 @@ def _write_setting(key: str, value: str) -> None:
     )
 
 
+def _sync_theme_colors() -> None:
+    global SURFACE0, SURFACE1, SURFACE2, TEXT, SUBTEXT, ACCENT, GREEN, RED
+    SURFACE0 = _theme.SURFACE0
+    SURFACE1 = _theme.SURFACE1
+    SURFACE2 = _theme.SURFACE2
+    TEXT = _theme.TEXT
+    SUBTEXT = _theme.SUBTEXT
+    ACCENT = _theme.ACCENT
+    GREEN = _theme.GREEN
+    RED = _theme.RED
+
+
 def _settings_button_style(kind: str = "normal", *, bold: bool = False) -> str:
+    _sync_theme_colors()
     if kind == "accent":
-        fg, bg, hover, border = ACCENT, "#1a2a3a", "#2a4a6a", ACCENT
+        fg = ACCENT
+        bg = "#d8e4f5" if _theme.is_light_theme() else "#1a2a3a"
+        hover = "#c5d8f6" if _theme.is_light_theme() else "#2a4a6a"
+        border = ACCENT
     elif kind == "success":
-        fg, bg, hover, border = GREEN, "#1a3a1a", "#2a5a2a", GREEN
+        fg = GREEN
+        bg = "#d8f5d8" if _theme.is_light_theme() else "#1a3a1a"
+        hover = "#c8e8c6" if _theme.is_light_theme() else "#2a5a2a"
+        border = GREEN
     elif kind == "danger":
-        fg, bg, hover, border = RED, "#3a1a1a", "#5a2a2a", RED
+        fg = RED
+        bg = "#f5d8d8" if _theme.is_light_theme() else "#3a1a1a"
+        hover = "#f5ccd0" if _theme.is_light_theme() else "#5a2a2a"
+        border = RED
     else:
         fg, bg, hover, border = TEXT, SURFACE1, SURFACE2, SURFACE2
     weight = "font-weight: bold;" if bold else ""
@@ -76,6 +103,64 @@ def _settings_button_style(kind: str = "normal", *, bold: bool = False) -> str:
         f"QPushButton:hover {{ background-color: {hover}; }}"
         f"QPushButton:pressed {{ background-color: {ACCENT}; color: {SURFACE0}; }}"
     )
+
+
+def _settings_dialog_style() -> str:
+    _sync_theme_colors()
+    return f"QDialog {{ background-color: {SURFACE0}; }}"
+
+
+def _note_label(text: str) -> QLabel:
+    _sync_theme_colors()
+    bg = "#dce8fb" if _theme.is_light_theme() else "#263147"
+    label = QLabel(text)
+    label.setWordWrap(True)
+    label.setFont(ui_font(-1))
+    label.setStyleSheet(
+        f"color: {SUBTEXT}; background: {bg}; "
+        f"border: 1px solid {SURFACE2}; border-radius: 6px; padding: 8px 10px;"
+    )
+    return label
+
+
+def _field_style() -> str:
+    _sync_theme_colors()
+    field_bg = "#f7f8fb" if _theme.is_light_theme() else "#242638"
+    return (
+        f"background-color: {field_bg}; color: {TEXT}; "
+        f"border: 1px solid {SURFACE2}; border-radius: 4px; padding: 3px 8px;"
+    )
+
+
+def _settings_form_label(text: str) -> QLabel:
+    _sync_theme_colors()
+    label = QLabel(text)
+    label.setMinimumWidth(58)
+    label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    label.setStyleSheet(f"color: {TEXT}; background: transparent;")
+    return label
+
+
+def _set_compact_field_height(widget: QWidget, height: int = 32) -> None:
+    widget.setMinimumHeight(height)
+    widget.setFixedHeight(height)
+
+
+def _scroll_page(content: QWidget) -> QScrollArea:
+    _sync_theme_colors()
+    content.setObjectName("settingsScrollContent")
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+    scroll.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored)
+    scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+    scroll.setMinimumHeight(0)
+    scroll.setWidget(content)
+    scroll.setStyleSheet(
+        f"QScrollArea {{ background: {SURFACE0}; border: none; }}"
+        f"QWidget#settingsScrollContent {{ background: {SURFACE0}; }}"
+    )
+    return scroll
 
 
 class _UnregisteredTilePreview(QLabel):
@@ -119,15 +204,17 @@ class SettingsDialog(QDialog):
         parent=None,
     ) -> None:
         super().__init__(parent)
+        _sync_theme_colors()
         self._client = client
         self._loading = True  # loading 中は auto_save を無効にする
 
         self.setWindowTitle(tr("settings.title"))
         self.setModal(True)
-        self.resize(480, 440)
-        self.setStyleSheet(f"QDialog {{ background-color: {SURFACE0}; }}")
+        self.resize(840, 700)
+        self.setStyleSheet(_settings_dialog_style())
 
         self._build_ui()
+        self._apply_control_style()
         self._connect_auto_save_signals()
         self._load_values()
 
@@ -135,30 +222,34 @@ class SettingsDialog(QDialog):
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(12, 12, 12, 12)
-        root.setSpacing(10)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(12)
 
         self._tabs = QTabWidget()
         self._tabs.addTab(self._build_appearance_tab(), tr("settings.tab_appearance"))
         self._tabs.addTab(self._build_connection_tab(), tr("settings.tab_connection"))
+        self._tabs.addTab(self._build_lmstudio_tab(),  tr("settings.tab_lmstudio"))
         self._tabs.addTab(self._build_templates_tab(),  tr("settings.tab_generation"))
         self._tabs.addTab(self._build_data_tab(),       tr("settings.tab_data"))
         root.addWidget(self._tabs, stretch=1)
 
-        note = QLabel(tr("settings.restart_note"))
-        note.setFont(ui_font(-2))
-        note.setStyleSheet(f"color: {SUBTEXT}; background: transparent;")
-        note.setWordWrap(True)
-        root.addWidget(note)
-
         root.addLayout(self._build_btn_row())
+
+    def _apply_control_style(self) -> None:
+        for cls in (QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit):
+            for widget in self.findChildren(cls):
+                widget.setStyleSheet(_field_style())
+        for cb in self.findChildren(QCheckBox):
+            cb.setStyleSheet(f"color: {TEXT}; background-color: transparent;")
 
     def _build_appearance_tab(self) -> QWidget:
         w = QWidget()
         form = QFormLayout(w)
-        form.setContentsMargins(12, 12, 12, 12)
+        form.setContentsMargins(16, 16, 16, 16)
         form.setSpacing(12)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        form.addRow(_note_label(tr("settings.restart_note")))
 
         # 言語 — "Language:" はどの言語でも共通なのでハードコード
         lang_lbl = QLabel("Language:")
@@ -409,7 +500,7 @@ class SettingsDialog(QDialog):
     def _build_connection_tab(self) -> QWidget:
         w = QWidget()
         form = QFormLayout(w)
-        form.setContentsMargins(12, 12, 12, 12)
+        form.setContentsMargins(16, 16, 16, 16)
         form.setSpacing(12)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
@@ -435,73 +526,271 @@ class SettingsDialog(QDialog):
         setup_w.setLayout(setup_row)
         form.addRow(QLabel(""), setup_w)
 
-        sep = QLabel("")
-        sep.setFixedHeight(8)
-        form.addRow(sep)
-
-        lm_provider_lbl = QLabel(tr("settings.lm_provider_label"))
-        lm_provider_lbl.setStyleSheet(f"color: {TEXT}; background: transparent;")
-        self._lm_provider_combo = QComboBox()
-        self._lm_provider_combo.addItem("LM Studio", "lmstudio")
-        self._lm_provider_combo.addItem("llama.cpp", "llama_cpp")
-        self._lm_provider_combo.addItem("Ollama", "ollama")
-        form.addRow(lm_provider_lbl, self._lm_provider_combo)
-
-        lm_lbl = QLabel(tr("settings.lm_endpoint_label"))
-        lm_lbl.setStyleSheet(f"color: {TEXT}; background: transparent;")
-        self._lm_endpoint_edit = QLineEdit()
-        self._lm_endpoint_edit.setPlaceholderText("http://localhost:1234")
-        self._lm_endpoint_edit.setToolTip(tr("settings.lm_endpoint_tooltip"))
-        form.addRow(lm_lbl, self._lm_endpoint_edit)
-
-        sep2 = QLabel("")
-        sep2.setFixedHeight(8)
-        form.addRow(sep2)
-
-        classify_provider_lbl = QLabel(tr("settings.lm_classify_provider_label"))
-        classify_provider_lbl.setStyleSheet(f"color: {TEXT}; background: transparent;")
-        self._lm_classify_provider_combo = QComboBox()
-        self._lm_classify_provider_combo.addItem(tr("settings.lm_classify_use_translate"), "")
-        self._lm_classify_provider_combo.addItem("LM Studio", "lmstudio")
-        self._lm_classify_provider_combo.addItem("llama.cpp", "llama_cpp")
-        self._lm_classify_provider_combo.addItem("Ollama", "ollama")
-        form.addRow(classify_provider_lbl, self._lm_classify_provider_combo)
-
-        classify_endpoint_lbl = QLabel(tr("settings.lm_classify_endpoint_label"))
-        classify_endpoint_lbl.setStyleSheet(f"color: {TEXT}; background: transparent;")
-        self._lm_classify_endpoint_edit = QLineEdit()
-        self._lm_classify_endpoint_edit.setPlaceholderText(tr("settings.lm_classify_endpoint_placeholder"))
-        form.addRow(classify_endpoint_lbl, self._lm_classify_endpoint_edit)
-
-        classify_model_lbl = QLabel(tr("settings.lm_classify_model_label"))
-        classify_model_lbl.setStyleSheet(f"color: {TEXT}; background: transparent;")
-        self._lm_classify_model_edit = QLineEdit()
-        self._lm_classify_model_edit.setPlaceholderText(tr("settings.lm_classify_model_placeholder"))
-        form.addRow(classify_model_lbl, self._lm_classify_model_edit)
-
-        classify_seed_lbl = QLabel(tr("settings.lm_classify_seed_label"))
-        classify_seed_lbl.setStyleSheet(f"color: {TEXT}; background: transparent;")
-        self._lm_classify_seed_edit = QLineEdit()
-        self._lm_classify_seed_edit.setPlaceholderText("0")
-        form.addRow(classify_seed_lbl, self._lm_classify_seed_edit)
-
-        classify_temp_lbl = QLabel(tr("settings.lm_classify_temperature_label"))
-        classify_temp_lbl.setStyleSheet(f"color: {TEXT}; background: transparent;")
-        self._lm_classify_temperature_edit = QLineEdit()
-        self._lm_classify_temperature_edit.setPlaceholderText("0")
-        form.addRow(classify_temp_lbl, self._lm_classify_temperature_edit)
-
-        classify_prompt_lbl = QLabel(tr("settings.lm_classify_prompt_label"))
-        classify_prompt_lbl.setStyleSheet(f"color: {TEXT}; background: transparent;")
-        self._lm_classify_prompt_edit = QLineEdit()
-        self._lm_classify_prompt_edit.setPlaceholderText(tr("settings.lm_classify_prompt_placeholder"))
-        form.addRow(classify_prompt_lbl, self._lm_classify_prompt_edit)
-
         return w
 
     def _request_invoke_setup(self) -> None:
         self.invoke_setup_requested.emit()
         self.reject()
+
+    def _build_lmstudio_tab(self) -> QWidget:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(12)
+
+        lay.addWidget(_note_label(tr("settings.lmstudio_info")))
+
+        conn_group = QGroupBox(tr("settings.lmstudio_connection_section"))
+        conn_form = QFormLayout(conn_group)
+        conn_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        conn_form.setContentsMargins(12, 12, 12, 12)
+        conn_form.setHorizontalSpacing(12)
+        conn_form.setVerticalSpacing(9)
+
+        lm_lbl = _settings_form_label(tr("settings.lmstudio_endpoint_label"))
+        self._lm_endpoint_edit = QLineEdit()
+        self._lm_endpoint_edit.setPlaceholderText("http://localhost:1234")
+        self._lm_endpoint_edit.setToolTip(tr("settings.lm_endpoint_tooltip"))
+        self._lm_endpoint_edit.setStyleSheet(_field_style())
+        _set_compact_field_height(self._lm_endpoint_edit)
+        conn_form.addRow(lm_lbl, self._lm_endpoint_edit)
+
+        model_lbl = _settings_form_label(tr("settings.lmstudio_model_label"))
+        model_row = QHBoxLayout()
+        model_row.setContentsMargins(0, 0, 0, 0)
+        model_row.setSpacing(8)
+        self._lm_model_combo = QComboBox()
+        self._lm_model_combo.setEditable(True)
+        self._lm_model_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._lm_model_combo.setToolTip(tr("settings.lmstudio_model_tooltip"))
+        self._lm_model_combo.setStyleSheet(_field_style())
+        _set_compact_field_height(self._lm_model_combo)
+        model_row.addWidget(self._lm_model_combo, 1)
+        self._btn_lm_reload = QPushButton(tr("settings.lmstudio_reload_models_btn"))
+        self._btn_lm_reload.setStyleSheet(_settings_button_style("accent"))
+        self._btn_lm_reload.clicked.connect(self._refresh_lm_models)
+        self._btn_lm_reload.setFixedWidth(92)
+        _set_compact_field_height(self._btn_lm_reload)
+        model_row.addWidget(self._btn_lm_reload)
+        model_w = QWidget()
+        model_w.setLayout(model_row)
+        conn_form.addRow(model_lbl, model_w)
+
+        note_lbl = _settings_form_label(tr("settings.lmstudio_model_note_label"))
+        self._lm_note_edit = QLineEdit()
+        self._lm_note_edit.setPlaceholderText(tr("settings.lmstudio_model_note_placeholder"))
+        self._lm_note_edit.setStyleSheet(_field_style())
+        _set_compact_field_height(self._lm_note_edit)
+        conn_form.addRow(note_lbl, self._lm_note_edit)
+
+        prompt_row = QHBoxLayout()
+        self._lm_prompt_btn = QPushButton(tr("settings.lmstudio_prompt_edit_btn"))
+        self._lm_prompt_btn.setStyleSheet(_settings_button_style())
+        self._lm_prompt_btn.clicked.connect(self._toggle_lm_prompt_editor)
+        prompt_row.addWidget(self._lm_prompt_btn)
+        prompt_row.addStretch(1)
+        prompt_w = QWidget()
+        prompt_w.setLayout(prompt_row)
+        conn_form.addRow(QLabel(""), prompt_w)
+
+        lay.addWidget(conn_group)
+
+        runtime_group = QGroupBox(tr("settings.lmstudio_runtime_section"))
+        runtime_lay = QHBoxLayout(runtime_group)
+        runtime_lay.setContentsMargins(12, 12, 12, 12)
+        runtime_lay.setSpacing(12)
+
+        temperature_lbl = _settings_form_label(tr("settings.lmstudio_temperature_label"))
+        self._lm_temperature_spin = QDoubleSpinBox()
+        self._lm_temperature_spin.setRange(0.1, 2.0)
+        self._lm_temperature_spin.setSingleStep(0.1)
+        self._lm_temperature_spin.setDecimals(2)
+        self._lm_temperature_spin.setValue(DEFAULT_LM_TEMPERATURE)
+        self._lm_temperature_spin.setToolTip(tr("settings.lmstudio_temperature_tooltip"))
+        self._lm_temperature_spin.setFixedWidth(86)
+        self._lm_temperature_spin.setStyleSheet(_field_style())
+        _set_compact_field_height(self._lm_temperature_spin)
+        runtime_lay.addWidget(temperature_lbl)
+        runtime_lay.addWidget(self._lm_temperature_spin)
+
+        seed_lbl = _settings_form_label(tr("settings.lmstudio_seed_label"))
+        self._lm_seed_spin = QSpinBox()
+        self._lm_seed_spin.setRange(1, 2_147_483_647)
+        self._lm_seed_spin.setValue(DEFAULT_LM_SEED)
+        self._lm_seed_spin.setToolTip(tr("settings.lmstudio_seed_tooltip"))
+        self._lm_seed_spin.setFixedWidth(126)
+        self._lm_seed_spin.setStyleSheet(_field_style())
+        _set_compact_field_height(self._lm_seed_spin)
+        runtime_lay.addWidget(seed_lbl)
+        runtime_lay.addWidget(self._lm_seed_spin)
+        runtime_lay.addStretch(1)
+
+        lay.addWidget(runtime_group)
+
+        classify_group = QGroupBox(tr("settings.lmstudio_classify_section"))
+        classify_form = QFormLayout(classify_group)
+        classify_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        classify_form.setContentsMargins(12, 12, 12, 12)
+        classify_form.setHorizontalSpacing(12)
+        classify_form.setVerticalSpacing(9)
+
+        classify_model_lbl = _settings_form_label(tr("settings.lm_classify_model_label"))
+        self._lm_classify_model_combo = QComboBox()
+        self._lm_classify_model_combo.setEditable(True)
+        self._lm_classify_model_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._lm_classify_model_combo.setToolTip(tr("settings.lm_classify_model_placeholder"))
+        self._lm_classify_model_combo.setStyleSheet(_field_style())
+        _set_compact_field_height(self._lm_classify_model_combo)
+        classify_form.addRow(classify_model_lbl, self._lm_classify_model_combo)
+
+        classify_prompt_lbl = _settings_form_label(tr("settings.lm_classify_prompt_label"))
+        self._lm_classify_prompt_edit = QTextEdit()
+        self._lm_classify_prompt_edit.setFixedHeight(72)
+        self._lm_classify_prompt_edit.setPlaceholderText(tr("settings.lm_classify_prompt_placeholder"))
+        self._lm_classify_prompt_edit.setStyleSheet(_field_style())
+        classify_form.addRow(classify_prompt_lbl, self._lm_classify_prompt_edit)
+
+        lay.addWidget(classify_group)
+        lay.addStretch(1)
+        self._lm_model_meta: dict[str, dict] = {}
+        self._lm_prompt_window = None
+        return _scroll_page(w)
+
+    @staticmethod
+    def _format_lm_size(size_bytes) -> str:
+        try:
+            size = float(size_bytes)
+        except (TypeError, ValueError):
+            return ""
+        if size <= 0:
+            return ""
+        return f"{size / (1024 ** 3):.1f}GB"
+
+    def _format_lm_model_label(self, model: dict) -> str:
+        mid = model.get("key") or model.get("id") or ""
+        label = model.get("display_name") or mid
+        details: list[str] = []
+        params = model.get("params_string")
+        if params:
+            details.append(str(params))
+        quant = model.get("quantization")
+        if isinstance(quant, dict) and quant.get("name"):
+            details.append(str(quant["name"]))
+        elif isinstance(quant, str):
+            details.append(quant)
+        size = self._format_lm_size(model.get("size_bytes"))
+        if size:
+            details.append(size)
+        return f"{label} [{', '.join(details)}]" if details else label
+
+    def _current_lm_model_id(self) -> str:
+        if not hasattr(self, "_lm_model_combo"):
+            return ""
+        text = self._lm_model_combo.currentText().strip()
+        idx = self._lm_model_combo.currentIndex()
+        data = self._lm_model_combo.currentData()
+        if isinstance(data, str) and data:
+            item_text = self._lm_model_combo.itemText(idx).strip() if idx >= 0 else ""
+            if text == item_text or text == data:
+                return data
+        return text
+
+    def _current_lm_classify_model_id(self) -> str:
+        if not hasattr(self, "_lm_classify_model_combo"):
+            return ""
+        text = self._lm_classify_model_combo.currentText().strip()
+        idx = self._lm_classify_model_combo.currentIndex()
+        data = self._lm_classify_model_combo.currentData()
+        if isinstance(data, str) and data:
+            item_text = self._lm_classify_model_combo.itemText(idx).strip() if idx >= 0 else ""
+            if text == item_text or text == data:
+                return data
+        return text
+
+    def _lm_notes(self) -> dict:
+        raw = _read_setting("lm_model_notes_json", "{}")
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _load_lm_model_note(self) -> None:
+        if not hasattr(self, "_lm_note_edit"):
+            return
+        note = self._lm_notes().get(self._current_lm_model_id(), "")
+        self._lm_note_edit.blockSignals(True)
+        self._lm_note_edit.setText(note)
+        self._lm_note_edit.blockSignals(False)
+
+    def _save_lm_model_note(self) -> None:
+        model = self._current_lm_model_id()
+        if not model:
+            return
+        notes = self._lm_notes()
+        text = self._lm_note_edit.text().strip()
+        if text:
+            notes[model] = text
+        else:
+            notes.pop(model, None)
+        _write_setting("lm_model_notes_json", json.dumps(notes, ensure_ascii=False))
+
+    def _on_lm_model_changed(self, *_args) -> None:
+        if self._loading:
+            return
+        _write_setting("lm_translate_model", self._current_lm_model_id())
+        self._load_lm_model_note()
+
+    def _refresh_lm_models(self) -> None:
+        self._do_save()
+        lm_url = self._lm_endpoint_edit.text().strip() or "http://localhost:1234"
+        current = self._current_lm_model_id() or _read_setting("lm_translate_model", "")
+        notes = self._lm_notes()
+        try:
+            client = LMClient(base_url=lm_url, provider="lmstudio")
+            models = client.models_list_detailed()
+        except Exception as e:
+            QMessageBox.warning(self, tr("settings.lmstudio_reload_failed_title"), str(e))
+            return
+
+        self._lm_model_meta = {}
+        self._lm_model_combo.blockSignals(True)
+        self._lm_classify_model_combo.blockSignals(True)
+        self._lm_model_combo.clear()
+        self._lm_classify_model_combo.clear()
+        for m in models:
+            mid = m.get("key") or m.get("id") or ""
+            if not mid:
+                continue
+            self._lm_model_meta[mid] = m
+            note = notes.get(mid, "")
+            label = self._format_lm_model_label(m)
+            if note:
+                label = f"{label} - {note}"
+            self._lm_model_combo.addItem(label, mid)
+            self._lm_classify_model_combo.addItem(self._format_lm_model_label(m), mid)
+        idx = self._lm_model_combo.findData(current)
+        if idx >= 0:
+            self._lm_model_combo.setCurrentIndex(idx)
+        elif current:
+            self._lm_model_combo.setEditText(current)
+        classify_current = _read_setting("lm_classify_model", "")
+        classify_idx = self._lm_classify_model_combo.findData(classify_current)
+        if classify_idx >= 0:
+            self._lm_classify_model_combo.setCurrentIndex(classify_idx)
+        elif classify_current:
+            self._lm_classify_model_combo.setEditText(classify_current)
+        self._lm_model_combo.blockSignals(False)
+        self._lm_classify_model_combo.blockSignals(False)
+        _write_setting("lm_translate_model", self._current_lm_model_id())
+        _write_setting("lm_classify_model", self._current_lm_classify_model_id())
+        self._load_lm_model_note()
+
+    def _toggle_lm_prompt_editor(self) -> None:
+        if self._lm_prompt_window is None:
+            from ui.lm_prompt_editor import LMPromptEditorWindow
+            self._lm_prompt_window = LMPromptEditorWindow(parent=self)
+        self._lm_prompt_window.toggle()
 
     # ── テンプレート管理タブ ────────────────────────────
 
@@ -762,12 +1051,6 @@ class SettingsDialog(QDialog):
         lay.setContentsMargins(12, 12, 12, 12)
         lay.setSpacing(16)
 
-        _ss_group = (
-            f"QGroupBox {{ color: {ACCENT}; border: 1px solid {SURFACE2}; "
-            f"border-radius: 4px; margin-top: 8px; padding-top: 4px; "
-            f"font-weight: bold; background: {SURFACE0}; }}"
-            f"QGroupBox::title {{ subcontrol-origin: margin; left: 8px; padding: 0 4px; }}"
-        )
         _ss_desc = f"color: {SUBTEXT}; background: transparent; padding: 2px 0;"
         _ss_btn = (
             f"QPushButton {{ background: {SURFACE1}; color: {TEXT}; "
@@ -777,7 +1060,6 @@ class SettingsDialog(QDialog):
 
         # ── バックアップ案内セクション ────────────────────
         backup_grp = QGroupBox(tr("settings.data_backup_section"))
-        backup_grp.setStyleSheet(_ss_group)
         backup_lay = QVBoxLayout(backup_grp)
         backup_lay.setSpacing(8)
 
@@ -789,7 +1071,6 @@ class SettingsDialog(QDialog):
 
         # ── キャッシュ管理セクション ────────────────────
         cache_grp = QGroupBox(tr("settings.data_cache_section"))
-        cache_grp.setStyleSheet(_ss_group)
         cache_lay = QVBoxLayout(cache_grp)
         cache_lay.setSpacing(8)
 
@@ -965,20 +1246,29 @@ class SettingsDialog(QDialog):
             queue_id = getattr(self._client, "queue_id", "") or ""
         self._queue_id_edit.setText(queue_id or "default")
 
-        # Local LLM
-        lm_provider = _read_setting("lm_provider", "lmstudio")
-        idx = self._lm_provider_combo.findData(lm_provider)
-        self._lm_provider_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        # LM Studio
         lm_endpoint = _read_setting("lm_endpoint", "http://localhost:1234")
         self._lm_endpoint_edit.setText(lm_endpoint)
-        classify_provider = _read_setting("lm_classify_provider", "")
-        idx = self._lm_classify_provider_combo.findData(classify_provider)
-        self._lm_classify_provider_combo.setCurrentIndex(idx if idx >= 0 else 0)
-        self._lm_classify_endpoint_edit.setText(_read_setting("lm_classify_endpoint", ""))
-        self._lm_classify_model_edit.setText(_read_setting("lm_classify_model", ""))
-        self._lm_classify_seed_edit.setText(_read_setting("lm_classify_seed", "0"))
-        self._lm_classify_temperature_edit.setText(_read_setting("lm_classify_temperature", "0"))
-        self._lm_classify_prompt_edit.setText(_read_setting("lm_classify_prompt", ""))
+        saved_model = _read_setting("lm_translate_model", "")
+        if saved_model:
+            self._lm_model_combo.addItem(saved_model, saved_model)
+            self._lm_model_combo.setCurrentIndex(0)
+        self._load_lm_model_note()
+        try:
+            lm_temperature = float(_read_setting("lm_temperature", str(DEFAULT_LM_TEMPERATURE)))
+        except ValueError:
+            lm_temperature = DEFAULT_LM_TEMPERATURE
+        self._lm_temperature_spin.setValue(lm_temperature if lm_temperature > 0 else DEFAULT_LM_TEMPERATURE)
+        try:
+            lm_seed = int(_read_setting("lm_seed", str(DEFAULT_LM_SEED)))
+        except ValueError:
+            lm_seed = DEFAULT_LM_SEED
+        self._lm_seed_spin.setValue(lm_seed if lm_seed > 0 else DEFAULT_LM_SEED)
+        saved_classify_model = _read_setting("lm_classify_model", "")
+        if saved_classify_model:
+            self._lm_classify_model_combo.addItem(saved_classify_model, saved_classify_model)
+            self._lm_classify_model_combo.setCurrentIndex(0)
+        self._lm_classify_prompt_edit.setPlainText(_read_setting("lm_classify_prompt", "") or DEFAULT_CLASSIFY_PROMPT)
         self._loading = False  # 初期化完了: 以降は即時保存を有効化
 
     def _pick_icon(self) -> None:
@@ -1001,14 +1291,15 @@ class SettingsDialog(QDialog):
         self._suggestions_rebuild_on_startup_cb.stateChanged.connect(self._auto_save)
         self._endpoint_edit.editingFinished.connect(self._auto_save)
         self._queue_id_edit.editingFinished.connect(self._auto_save)
-        self._lm_provider_combo.currentIndexChanged.connect(self._auto_save)
         self._lm_endpoint_edit.editingFinished.connect(self._auto_save)
-        self._lm_classify_provider_combo.currentIndexChanged.connect(self._auto_save)
-        self._lm_classify_endpoint_edit.editingFinished.connect(self._auto_save)
-        self._lm_classify_model_edit.editingFinished.connect(self._auto_save)
-        self._lm_classify_seed_edit.editingFinished.connect(self._auto_save)
-        self._lm_classify_temperature_edit.editingFinished.connect(self._auto_save)
-        self._lm_classify_prompt_edit.editingFinished.connect(self._auto_save)
+        self._lm_model_combo.currentIndexChanged.connect(self._on_lm_model_changed)
+        self._lm_model_combo.editTextChanged.connect(self._on_lm_model_changed)
+        self._lm_note_edit.editingFinished.connect(self._save_lm_model_note)
+        self._lm_temperature_spin.valueChanged.connect(self._auto_save)
+        self._lm_seed_spin.valueChanged.connect(self._auto_save)
+        self._lm_classify_model_combo.currentIndexChanged.connect(self._auto_save)
+        self._lm_classify_model_combo.editTextChanged.connect(self._auto_save)
+        self._lm_classify_prompt_edit.textChanged.connect(self._auto_save)
 
     def _auto_save(self) -> None:
         """loading 中以外は即時 DB 保存。"""
@@ -1045,13 +1336,13 @@ class SettingsDialog(QDialog):
             "lm_endpoint",
             self._lm_endpoint_edit.text().strip() or "http://localhost:1234",
         )
-        _write_setting("lm_provider", self._lm_provider_combo.currentData() or "lmstudio")
-        _write_setting("lm_classify_provider", self._lm_classify_provider_combo.currentData() or "")
-        _write_setting("lm_classify_endpoint", self._lm_classify_endpoint_edit.text().strip())
-        _write_setting("lm_classify_model", self._lm_classify_model_edit.text().strip())
-        _write_setting("lm_classify_seed", self._lm_classify_seed_edit.text().strip() or "0")
-        _write_setting("lm_classify_temperature", self._lm_classify_temperature_edit.text().strip() or "0")
-        _write_setting("lm_classify_prompt", self._lm_classify_prompt_edit.text().strip())
+        _write_setting("lm_provider", "lmstudio")
+        _write_setting("lm_translate_model", self._current_lm_model_id())
+        _write_setting("lm_temperature", f"{self._lm_temperature_spin.value():.2f}".rstrip("0").rstrip("."))
+        _write_setting("lm_seed", str(self._lm_seed_spin.value()))
+        _write_setting("lm_classify_provider", "lmstudio")
+        _write_setting("lm_classify_model", self._current_lm_classify_model_id())
+        _write_setting("lm_classify_prompt", self._lm_classify_prompt_edit.toPlainText().strip() or DEFAULT_CLASSIFY_PROMPT)
 
         if self._client is not None:
             if endpoint:

@@ -36,6 +36,7 @@ from core.invoke_prompt import parse_invoke_prompt
 from core.prompt_builder import GroupTile, NaturalTextTile, PromptDocument, TagTile
 from core.png_meta import read_png_meta
 from core.i18n import set_language, tr
+from core.lm_settings import lm_seed, lm_temperature
 from ui.meta_dialog import MetaDialog
 from ui.prompt_editor import PromptEditor
 from ui.tag_browser import TagBrowser
@@ -716,6 +717,8 @@ class _TranslateStreamWorker(QThread):
         text: str,
         system_prompt: str,
         model: str,
+        temperature: float | None = None,
+        seed: int | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -723,6 +726,8 @@ class _TranslateStreamWorker(QThread):
         self._text          = text
         self._system_prompt = system_prompt
         self._model         = model
+        self._temperature   = lm_temperature() if temperature is None else temperature
+        self._seed          = lm_seed() if seed is None else seed
         self._cancel        = [False]
 
     def cancel(self) -> None:
@@ -739,7 +744,9 @@ class _TranslateStreamWorker(QThread):
             thinking_buf: list[str] = []
             for ev_type, ev_data in self._client.translate_stream(
                 self._text, self._system_prompt, self._model,
+                temperature=self._temperature,
                 cancel_flag=self._cancel,
+                seed=self._seed,
             ):
                 if self._cancel[0]:
                     return
@@ -856,7 +863,7 @@ class _UnregisteredPromptTranslateDialog(QDialog):
         self._current.setText(f"翻訳中: {tag}  ({self._index + 1}/{self._total})")
 
         lm_url = _get_setting("lm_endpoint", "http://localhost:1234")
-        provider = _get_setting("lm_provider", "lmstudio")
+        provider = "lmstudio"
         try:
             chunk_timeout = float(_get_setting("lm_chunk_timeout", "60"))
         except ValueError:
@@ -957,8 +964,6 @@ class MainWindow(QMainWindow):
         self._translate_line_index: int = 0              # 複数行翻訳: 現在処理中の行番号
         self._translate_mode_cache: str = "danboard"     # 複数行翻訳: モード保存用
         self._translate_has_failure: bool = False        # 複数行翻訳: いずれかの行が失敗したか
-        self._lm_prompt_window = None                           # フローティングプロンプト編集ウィンドウ
-        self._lm_model_meta: dict[str, dict] = {}               # LM Studio モデル詳細
         self._selected_model_key: str = ""                 # 選択中モデルの Invoke キー
         self._selected_plan_id: int | None = None          # 選択中マルチモデルプラン
         self._current_base: str = "sdxl"                   # 選択中モデルのベース種別
@@ -1260,8 +1265,6 @@ class MainWindow(QMainWindow):
         """
         Row 2 — Invoke 生成パラメータ行
         Model  🔄 | Steps  CFG | Sched | Board
-        Row 3 — ローカルLLM行
-        Trans LM  🔄  🧩
         """
         self.addToolBarBreak()
         pb = QToolBar("モデルパラメータ")
@@ -1373,56 +1376,6 @@ class MainWindow(QMainWindow):
         self._btn_board_reload = self._square_btn("🔄", tr("main.board_reload_tooltip"))
         self._btn_board_reload.clicked.connect(self._refresh_boards)
         pb.addWidget(self._btn_board_reload)
-
-        # ── ローカルLLM行 ─────────────────────────────────
-        self.addToolBarBreak()
-        lb = QToolBar("ローカルLLM")
-        self._lm_toolbar = lb
-        lb.setMovable(False)
-        lb.setIconSize(QSize(14, 14))
-        self.addToolBar(lb)
-
-        self._lm_label = QLabel(tr("main.translate_lm_label"))
-        lb.addWidget(self._lm_label)
-        self._lm_model_combo = _WidePopupComboBox(min_width=360, max_width=10000, width_reserve=0)
-        self._lm_model_combo.view().setUniformItemSizes(False)
-        self._lm_model_combo.view().setWordWrap(True)
-        self._lm_model_combo.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        self._lm_model_combo.setEditable(True)
-        self._lm_model_combo.lineEdit().setAlignment(Qt.AlignmentFlag.AlignLeft)
-        self._lm_model_combo.lineEdit().setReadOnly(True)
-        self._lm_model_combo.lineEdit().setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
-        self._lm_model_combo.setToolTip(tr("main.translate_lm_tooltip"))
-        # 保存済みモデルをまず復元（同期前でも表示されるように）
-        _saved_lm = _get_setting("lm_translate_model", "")
-        if _saved_lm:
-            self._lm_model_combo.addItem(_saved_lm)
-            self._lm_model_combo.setCurrentText(_saved_lm)
-        self._lm_model_combo.currentTextChanged.connect(self._save_lm_model_selection)
-        self._lm_model_combo.currentIndexChanged.connect(self._on_lm_model_changed)
-        self._lm_model_combo.currentTextChanged.connect(self._queue_lm_combo_display_sync)
-        self._lm_model_combo.activated.connect(lambda *_: self._queue_lm_combo_display_sync())
-        lb.addWidget(self._lm_model_combo)
-
-        self._btn_lm_reload = self._square_btn("🔄", tr("main.translate_lm_reload_tooltip"))
-        self._btn_lm_reload.clicked.connect(self._refresh_lm_models)
-        lb.addWidget(self._btn_lm_reload)
-
-        self._lm_prompt_btn = self._square_btn("🧩", tr("main.translate_prompt_tooltip"))
-        self._lm_prompt_btn.clicked.connect(self._toggle_lm_prompt_editor)
-        lb.addWidget(self._lm_prompt_btn)
-
-        self._lm_note_edit = QLineEdit()
-        self._lm_note_edit.setFixedWidth(360)
-        self._lm_note_edit.setPlaceholderText(tr("main.translate_lm_note_placeholder"))
-        self._lm_note_edit.setToolTip(tr("main.translate_lm_note_tooltip"))
-        self._lm_note_edit.setStyleSheet(
-            f"QLineEdit {{ color: {TEXT}; padding: 0 4px; "
-            f"border: 1px solid {SURFACE2}; border-radius: 3px; background: {SURFACE0}; }}"
-        )
-        self._lm_note_edit.textEdited.connect(self._save_lm_model_note)
-        lb.addWidget(self._lm_note_edit)
-        self._load_lm_model_note()
 
     @staticmethod
     def _snap_dimension(spin: "QSpinBox", multiple: int = 8) -> None:
@@ -3490,20 +3443,12 @@ class MainWindow(QMainWindow):
     def _get_sys_prompt(self, mode: str) -> str:
         """モードに応じたシステムプロンプトを返す。"""
         if mode == "natural":
-            sp = (
-                self._lm_prompt_window.get_prompt_natural()
-                if self._lm_prompt_window is not None
-                else ""
-            )
+            sp = _get_setting("lm_translate_prompt_natural", "")
             if not sp:
                 from ui.lm_prompt_editor import _DEFAULT_NATURAL_PROMPT
                 sp = _DEFAULT_NATURAL_PROMPT
         else:
-            sp = (
-                self._lm_prompt_window.get_prompt()
-                if self._lm_prompt_window is not None
-                else ""
-            )
+            sp = _get_setting("lm_translate_prompt", "")
             if not sp:
                 from ui.lm_prompt_editor import _DEFAULT_PROMPT
                 sp = _DEFAULT_PROMPT
@@ -3512,7 +3457,7 @@ class MainWindow(QMainWindow):
     def _start_translate_single(self, target, text: str, mode: str) -> None:
         """単行翻訳ワーカーを起動し、パネル表示・ロックを行う。"""
         lm_url = _get_setting("lm_endpoint", "http://localhost:1234")
-        provider = _get_setting("lm_provider", "lmstudio")
+        provider = "lmstudio"
         model  = self._current_lm_model_id()
         try:
             chunk_timeout = float(_get_setting("lm_chunk_timeout", "60"))
@@ -3524,7 +3469,7 @@ class MainWindow(QMainWindow):
             self._on_translate_failed(status.message)
             return
         self._translate_worker = _TranslateStreamWorker(
-            client, text, self._get_sys_prompt(mode), model, parent=self
+            client, text, self._get_sys_prompt(mode), model, lm_temperature(), lm_seed(), parent=self
         )
         self._translate_worker.status_update.connect(target.append_translate_status)
         self._translate_worker.thinking_chunk.connect(target.append_translate_thinking)
@@ -3542,7 +3487,7 @@ class MainWindow(QMainWindow):
         if target is None:
             return
         lm_url = _get_setting("lm_endpoint", "http://localhost:1234")
-        provider = _get_setting("lm_provider", "lmstudio")
+        provider = "lmstudio"
         model  = self._current_lm_model_id()
         try:
             chunk_timeout = float(_get_setting("lm_chunk_timeout", "60"))
@@ -3561,7 +3506,7 @@ class MainWindow(QMainWindow):
             tr("main.translate_line_progress", current=idx + 1, total=total, preview=line_text[:30])
         )
         self._translate_worker = _TranslateStreamWorker(
-            client, line_text, self._get_sys_prompt(mode), model, parent=self
+            client, line_text, self._get_sys_prompt(mode), model, lm_temperature(), lm_seed(), parent=self
         )
         self._translate_worker.status_update.connect(target.append_translate_status)
         self._translate_worker.thinking_chunk.connect(target.append_translate_thinking)
@@ -3703,187 +3648,11 @@ class MainWindow(QMainWindow):
             target.set_translating(False)
             self._editor.refresh_layout()
 
-    def _refresh_lm_models(self) -> None:
-        """LM Studio からモデル一覧を取得してコンボボックスに反映する。"""
-        lm_url = _get_setting("lm_endpoint", "http://localhost:1234")
-        provider = _get_setting("lm_provider", "lmstudio")
-        try:
-            client = LMClient(base_url=lm_url, provider=provider)
-            models = client.models_list_detailed()
-            current = self._current_lm_model_id()
-            notes = self._lm_notes()
-            self._lm_model_meta = {}
-            self._lm_model_combo.blockSignals(True)
-            self._lm_model_combo.clear()
-            for m in models:
-                mid = m.get("key") or m.get("id") or ""
-                if mid:
-                    self._lm_model_meta[mid] = m
-                    note = notes.get(mid, "")
-                    self._lm_model_combo.addItem(self._format_lm_combo_popup_label(m, note), mid)
-                    self._set_lm_combo_note_data(
-                        self._lm_model_combo.count() - 1,
-                        note,
-                    )
-            # 以前の選択を復元
-            idx = self._lm_model_combo.findData(current)
-            if idx >= 0:
-                self._lm_model_combo.setCurrentIndex(idx)
-            elif current:
-                self._lm_model_combo.setEditText(current)
-            self._lm_model_combo.blockSignals(False)
-            self._sync_lm_combo_display_label()
-            self._lm_model_combo.adjust_to_current_text()
-            self._load_lm_model_note()
-            # blockSignals 中は currentTextChanged が発火しないため明示的に保存
-            self._save_lm_model_selection(self._current_lm_model_id())
-        except Exception:
-            pass  # LM Studio が起動していない場合は静かに無視
-
-    @staticmethod
-    def _format_lm_size(size_bytes) -> str:
-        try:
-            size = float(size_bytes)
-        except (TypeError, ValueError):
-            return ""
-        if size <= 0:
-            return ""
-        gib = size / (1024 ** 3)
-        return f"{gib:.1f}GB"
-
-    def _format_lm_model_label(self, model: dict) -> str:
-        mid = model.get("key") or model.get("id") or ""
-        label = model.get("display_name") or mid
-        details: list[str] = []
-        params = model.get("params_string")
-        if params:
-            details.append(str(params))
-        quant = model.get("quantization")
-        if isinstance(quant, dict) and quant.get("name"):
-            details.append(str(quant["name"]))
-        elif isinstance(quant, str):
-            details.append(quant)
-        size = self._format_lm_size(model.get("size_bytes"))
-        if size:
-            details.append(size)
-        if details:
-            label = f"{label} [{', '.join(details)}]"
-        return label
-
-    def _format_lm_combo_popup_label(self, model: dict, note: str) -> str:
-        label = self._format_lm_model_label(model)
-        note = (note or "").strip()
-        return f"{label}\n  {note}" if note else label
-
     def _current_lm_model_id(self) -> str:
-        if not hasattr(self, "_lm_model_combo"):
-            return ""
-        data = self._lm_model_combo.currentData()
-        if isinstance(data, str) and data:
-            return data
-        return self._lm_model_combo.currentText().strip()
+        return _get_setting("lm_translate_model", "")
 
     def _translation_lm_configured(self) -> bool:
         return bool(self._current_lm_model_id().strip())
-
-    def _lm_notes(self) -> dict:
-        raw = _get_setting("lm_model_notes_json", "{}")
-        try:
-            data = json.loads(raw)
-            return data if isinstance(data, dict) else {}
-        except Exception:
-            return {}
-
-    def _set_lm_combo_note_data(self, idx: int, note: str) -> None:
-        if idx < 0:
-            return
-        note = note or ""
-        model = self._lm_model_combo.itemData(idx)
-        meta = self._lm_model_meta.get(model, {"id": model})
-        base_label = self._format_lm_model_label(meta)
-        self._lm_model_combo.setItemText(idx, self._format_lm_combo_popup_label(meta, note))
-        self._lm_model_combo.setItemData(idx, base_label, _COMBO_BASE_LABEL_ROLE)
-        self._lm_model_combo.setItemData(idx, note, _COMBO_NOTE_ROLE)
-        if note:
-            height = self._lm_model_combo.fontMetrics().height() * 2 + 10
-            self._lm_model_combo.setItemData(idx, QSize(0, height), Qt.ItemDataRole.SizeHintRole)
-        else:
-            self._lm_model_combo.setItemData(idx, None, Qt.ItemDataRole.SizeHintRole)
-
-    def _sync_lm_combo_display_label(self) -> None:
-        if not hasattr(self, "_lm_model_combo") or not self._lm_model_combo.isEditable():
-            return
-        idx = self._lm_model_combo.currentIndex()
-        if idx < 0 or self._lm_model_combo.lineEdit() is None:
-            return
-        label = self._lm_model_combo.itemData(idx, _COMBO_BASE_LABEL_ROLE)
-        if not label:
-            label = self._lm_model_combo.currentText().splitlines()[0].strip()
-        self._lm_model_combo.lineEdit().blockSignals(True)
-        self._lm_model_combo.lineEdit().setText(label)
-        self._lm_model_combo.lineEdit().setCursorPosition(0)
-        self._lm_model_combo.lineEdit().blockSignals(False)
-
-    def _queue_lm_combo_display_sync(self, *_args) -> None:
-        QTimer.singleShot(0, self._sync_lm_combo_display_label)
-        QTimer.singleShot(30, self._sync_lm_combo_display_label)
-
-    def _load_lm_model_note(self) -> None:
-        if not hasattr(self, "_lm_note_edit"):
-            return
-        note = self._lm_notes().get(self._current_lm_model_id(), "")
-        self._lm_note_edit.blockSignals(True)
-        self._lm_note_edit.setText(note)
-        self._lm_note_edit.blockSignals(False)
-
-    def _save_lm_model_note(self, text: str) -> None:
-        model = self._current_lm_model_id()
-        if not model:
-            return
-        notes = self._lm_notes()
-        text = text.strip()
-        if text:
-            notes[model] = text
-        else:
-            notes.pop(model, None)
-        _app_db.execute(
-            "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
-            ("lm_model_notes_json", json.dumps(notes, ensure_ascii=False)),
-        )
-        self._update_lm_combo_note_label(model, text)
-
-    def _update_lm_combo_note_label(self, model: str, note: str) -> None:
-        idx = self._lm_model_combo.findData(model)
-        if idx < 0:
-            return
-        meta = self._lm_model_meta.get(model, {"id": model})
-        self._set_lm_combo_note_data(idx, note)
-        self._lm_model_combo.view().doItemsLayout()
-        if idx == self._lm_model_combo.currentIndex():
-            self._sync_lm_combo_display_label()
-            self._lm_model_combo.adjust_to_current_text()
-
-    def _on_lm_model_changed(self, _index: int) -> None:
-        model = self._current_lm_model_id()
-        if model:
-            self._save_lm_model_selection(model)
-        self._sync_lm_combo_display_label()
-        self._load_lm_model_note()
-
-    def _save_lm_model_selection(self, model: str) -> None:
-        """翻訳LMコンボの現在値を即保存し、タイル編集ダイアログ側にも反映させる。"""
-        self._lm_model_combo.adjust_to_current_text()
-        _app_db.execute(
-            "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
-            ("lm_translate_model", self._current_lm_model_id() or (model or "").strip()),
-        )
-
-    def _toggle_lm_prompt_editor(self) -> None:
-        """翻訳プロンプト編集ウィンドウを表示/非表示トグルする。"""
-        if self._lm_prompt_window is None:
-            from ui.lm_prompt_editor import LMPromptEditorWindow
-            self._lm_prompt_window = LMPromptEditorWindow(parent=self)
-        self._lm_prompt_window.toggle()
 
     # ── 接続確認（非同期） ────────────────────────────────
 
@@ -7233,12 +7002,6 @@ class MainWindow(QMainWindow):
         self._board_label.setText(tr("main.board_label"))
         self._board_combo.setToolTip(tr("main.board_tooltip"))
         self._btn_board_reload.setToolTip(tr("main.board_reload_tooltip"))
-        self._lm_label.setText(tr("main.translate_lm_label"))
-        self._lm_model_combo.setToolTip(tr("main.translate_lm_tooltip"))
-        self._btn_lm_reload.setToolTip(tr("main.translate_lm_reload_tooltip"))
-        self._lm_prompt_btn.setToolTip(tr("main.translate_prompt_tooltip"))
-        self._lm_note_edit.setPlaceholderText(tr("main.translate_lm_note_placeholder"))
-        self._lm_note_edit.setToolTip(tr("main.translate_lm_note_tooltip"))
         self._apply_model_mode_ui()
         self._update_left_pane_texts()
 
@@ -7272,10 +7035,6 @@ class MainWindow(QMainWindow):
         self._model_base_combo.setStyleSheet(combo_style)
         self._model_combo.setStyleSheet(combo_style)
         self._board_combo.setStyleSheet(combo_style)
-        self._lm_note_edit.setStyleSheet(
-            f"QLineEdit {{ color: {TEXT}; padding: 0 4px; "
-            f"border: 1px solid {SURFACE2}; border-radius: 3px; background: {SURFACE0}; }}"
-        )
 
     def _refresh_child_views_for_style_settings(self) -> None:
         self._editor.retranslate_and_restyle()
