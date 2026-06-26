@@ -1,17 +1,29 @@
-![PromptMosaic and Invoke side by side](docs/images/hero.jpg)
+![PromptMosaic main window](docs/images/hero.jpg)
 
 # PromptMosaic
 
 [Japanese](README.md) | [English](README_EN.md)
 
 **PromptMosaic** is a local prompt management and generation GUI for the image generation tool [Invoke](https://invoke.ai/).
-It is intended to be used side by side with Invoke: keep the Invoke viewer open on one side, and edit prompts, history, and regeneration flow in PromptMosaic on the other. It is designed around editing English prompts while showing local-language labels, such as Japanese, side by side. If you configure a local LLM such as LM Studio for translation, PromptMosaic can turn words or sentences in your language into English prompt tiles. Image generation itself is performed by Invoke.
+It is intended to run next to Invoke: keep Invoke open beside it, then use PromptMosaic for generation instructions, prompt editing, and history management. It is designed around editing English prompts while showing local-language labels, such as Japanese, side by side. If you configure a local LLM such as LM Studio for translation, PromptMosaic can turn words or sentences in your language into English prompt tiles. Image generation itself is performed by Invoke.
 
-- **Side-by-side Invoke workflow** - keep Invoke's viewer visible while using PromptMosaic for prompt editing, history management, and regeneration.
+- **Run beside Invoke** - keep Invoke open beside PromptMosaic, then use PromptMosaic for generation instructions, prompt editing, and history management.
+
+  <img src="docs/images/invoke_side_workflow.png" alt="Invoke and PromptMosaic running side by side" width="560">
+
 - **Bilingual tile editing** - view English prompt text and translated local-language labels side by side while arranging words or sentences as tiles with drag-and-drop, emphasis, and ON/OFF toggles.
+
+  <img src="docs/images/bilingual_tiles.png" alt="Bilingual prompt tiles" width="420">
+
 - **Tile groups** - group tiles together and use them for variation generation with all, sequential, or random selection modes. Tile groups support drag-and-drop and can be saved for reuse.
+
+  <img src="docs/images/tile_group.png" alt="Prompt tile group" width="420">
+
 - **Translation assistance** - use a local LLM such as LM Studio to convert words or sentences into English prompt tiles.
 - **Generation lineage / parallel-world history map** - visualize which generations branched from which results and jump back to any past point.
+
+  <img src="docs/images/lineage_map.png" alt="Generation lineage history map" width="560">
+
 - **Multi-model plans** - cycle through multiple models, LoRAs, and generation parameters in one generation run.
 - **11 languages** - Japanese, English, Chinese (Simplified / Traditional), Korean, German, French, Spanish, Italian, Portuguese (Brazil), and Russian.
 - **Simple data backup** - back up PromptMosaic by copying the entire `data` folder.
@@ -144,4 +156,3 @@ This application would not exist without the long-running work of the Invoke dev
 - **[LM Studio](https://lmstudio.ai/)** - optional local LLM server for prompt translation and automatic classification.
 
 > When redistributing, follow the license terms of each dependency. Pay special attention to the LGPL/GPL terms for PySide6 / shiboken6.
-

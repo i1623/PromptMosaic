@@ -7,7 +7,11 @@ File names match the screenshot placeholder comments in each document.
 
 | File name | Contents | Referenced by |
 | --- | --- | --- |
-| `hero.jpg` | Hero image showing Invoke and PromptMosaic side by side | README |
+| `hero.jpg` | Hero image showing the PromptMosaic main window | README |
+| `invoke_side_workflow.png` | Example workflow with PromptMosaic running beside Invoke | README |
+| `bilingual_tiles.png` | Example bilingual prompt tiles | README |
+| `tile_group.png` | Example tile group | README |
+| `lineage_map.png` | Example generation lineage history map | README |
 | `github_download_zip.png` | GitHub Code -> Download ZIP menu | TUTORIAL |
 | `browser_download_zip.png` | PromptMosaic-main.zip shown in the browser download list | TUTORIAL |
 | `windows_extract_zip.png` | Windows Extract All screen | TUTORIAL |

@@ -7,7 +7,11 @@
 
 | ファイル名 | 内容 | 参照元 |
 | --- | --- | --- |
-| `hero.jpg` | Invoke と PromptMosaic を分割表示した代表画像（ヒーロー画像） | README |
+| `hero.jpg` | PromptMosaic メイン画面の代表画像（ヒーロー画像） | README |
+| `invoke_side_workflow.png` | Invoke の横で PromptMosaic を使う運用例 | README |
+| `bilingual_tiles.png` | 二言語表示のタイル例 | README |
+| `tile_group.png` | タイルグループ例 | README |
+| `lineage_map.png` | 生成系譜（履歴マップ）の例 | README |
 | `github_download_zip.png` | GitHub の Code → Download ZIP メニュー | TUTORIAL |
 | `browser_download_zip.png` | ブラウザのダウンロード欄に表示された PromptMosaic-main.zip | TUTORIAL |
 | `windows_extract_zip.png` | Windows の「すべて展開」画面 | TUTORIAL |
