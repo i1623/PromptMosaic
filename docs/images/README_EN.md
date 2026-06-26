@@ -26,15 +26,14 @@ File names match the screenshot placeholder comments in each document.
 | `invoke_setup_template_saved.png` | One fetched template in the wizard | TUTORIAL |
 | `invoke_setup_templates_complete.png` | Multiple fetched templates in the wizard | TUTORIAL |
 | `invoke_setup_missing_template.png` | Missing template message | TUTORIAL |
-| `three_panes.png` | Annotated three-pane main window | TUTORIAL |
+| `three_panes.jpg` | Annotated three-pane main window | TUTORIAL |
 | `tiles.png` | Center pane with arranged tiles | TUTORIAL |
 | `generation_bar.png` | Generation bar with model, size, seed, and other controls | TUTORIAL |
-| `first_result.png` | First generated result shown in the right pane | TUTORIAL |
 | `history_map.png` | History map lineage tree | TUTORIAL |
 | `tag_browser.png` | Tag browser | MANUAL |
 | `side_panel_history.png` | Right-pane history | MANUAL |
 | `history_map_full.png` | Full history map | MANUAL |
 | `plan_dialog.png` | Multi-model plan editor dialog | MANUAL |
 
-> Screenshots other than the hero image are still represented by placeholders so the documents remain readable before they are added.
+> Missing screenshots are still represented by placeholders so the documents remain readable before they are added.
 

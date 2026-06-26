@@ -175,8 +175,7 @@ If you try to generate with a base model that has no template, PromptMosaic show
 
 PromptMosaic uses a three-pane layout.
 
-> Screenshot placeholder: annotated three-pane layout
-> `docs/images/three_panes.png`
+![Annotated three-pane layout](images/three_panes.jpg)
 
 | Area | Purpose |
 | --- | --- |
@@ -184,7 +183,7 @@ PromptMosaic uses a three-pane layout.
 | Center pane | Build and edit the active prompt as tiles |
 | Right pane | Review generation history, notes, groups, and deleted items |
 
-The generation bar is located near the prompt editor and contains model, size, seed, and generation controls.
+The generation bar sits at the top of the window, outside the three panes. It contains model, template, size, seed, and generation controls.
 
 ---
 
@@ -222,8 +221,7 @@ Translation is optional. PromptMosaic can generate normally if you type English 
 
 > The tag browser becomes useful after you register or import tags. For the first prompt, direct input or image drop is perfectly fine.
 
-> Screenshot placeholder: center pane with arranged tiles
-> `docs/images/tiles.png`
+![Center pane with arranged tiles](images/tiles.png)
 
 Tiles are meant to make prompt editing repeatable. After you find useful pieces, you can save them as tags, prompt text, or tile groups and reuse them later.
 
@@ -231,18 +229,17 @@ Tiles are meant to make prompt editing repeatable. After you find useful pieces,
 
 ## 7. Choose Model and Parameters
 
-In the generation bar, choose:
+Use the generation bar at the top of the window to choose:
 
-- Model / base model
-- Optional LoRA or multi-model plan
-- Width and height
-- Steps
-- CFG scale
-- Scheduler
-- Seed mode
+- **Base model / model** - choose the base model from **Model** in the generation bar. You can also double-click a model in the left pane's **Model** tab. PromptMosaic uses the template that matches the selected base model.
+- **Width and height** - pixel size, automatically adjusted to multiples of 8 when needed.
+- **Steps / CFG / Scheduler** - step count, prompt guidance, and scheduler.
+  - For distilled models such as FLUX2, CFG may be fixed to 1.0.
+- **Count** - number of images to generate in one run.
+- **Seed** - use the dice button for a random seed, and the lock toggle to keep or release the seed.
+- **Invoke save destination** - the board where Invoke stores generated images.
 
-> Screenshot placeholder: generation bar
-> `docs/images/generation_bar.png`
+![Generation bar with model, size, seed, and other controls](images/generation_bar.png)
 
 If a model cannot be selected or the generate button is disabled, check that the current base model has a saved generation template.
 
@@ -250,34 +247,39 @@ If a model cannot be selected or the generate button is disabled, check that the
 
 ## 8. Generate
 
-Use the generation buttons:
+There are two main generation buttons:
 
-- **Generate** - send one generation job.
-- **Generate All** - generate all configured targets in the current plan.
-- **Enqueue / plan buttons** - use configured multi-model plan behavior when available.
+| Button | Behavior |
+| --- | --- |
+| **Simple Generate** | Sends the job to Invoke without saving it to PromptMosaic history. |
+| **History Generate** | Sends the job to Invoke and records prompts, parameters, and results in PromptMosaic history. This is the normal choice. |
 
-PromptMosaic sends the job to Invoke. When the image is ready, it appears in the history area.
+The generation bar also has helper options:
 
-> Screenshot placeholder: first result visible in the right pane
-> `docs/images/first_result.png`
+- **Single item** - when Count is greater than 1, keep only one representative item in history.
+- **Map** - record the result in the generation lineage map.
+- **Stop** - stop queued or running generation work.
+
+PromptMosaic sends the job to Invoke. When the image is ready, it appears in the right-pane history. **Simple Generate** does not create PromptMosaic history entries.
 
 ---
 
 ## 9. Use History
 
-The right pane keeps generated results so you can compare them, reopen prompts, and branch from previous outputs.
+History is a supporting feature for reviewing past results, reusing previous prompts as tiles, and branching from earlier generations. The right pane lists history items, and the history map shows generation lineage as a tree.
 
-The history map shows lineage as a tree.
+- Click a right-pane history item to move the current position to that generation.
+- Drag a history item into the center pane to reuse its prompt as tiles.
+- Use the **brick** button beside a history item to bring its prompt tiles back into the editor.
+- There are two history maps.
+  - **Center-pane history map** - a compact map for checking the current generation lineage while editing prompts.
+  - **Expanded history map opened with the map button** - a larger window for viewing the whole lineage and moving to distant nodes.
+- Both history maps show parent-child generation lineage as a tree.
+- Click a history-map node to move the current position. If the right pane is open, PromptMosaic scrolls to the matching history item.
+- Right-click a history-map node to edit it or open the image window.
+- Generate again with **History Generate** after restoring a previous item to create a new child branch.
 
-> Screenshot placeholder: history map lineage tree
-> `docs/images/history_map.png`
-
-Common actions:
-
-- Select a past generation to restore its prompt and parameters.
-- Branch from a result by generating again.
-- Review or rename history entries.
-- Open the image viewer from a history item.
+![History map lineage tree](images/history_map.png)
 
 ---
 

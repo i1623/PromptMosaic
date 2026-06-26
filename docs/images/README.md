@@ -26,15 +26,14 @@
 | `invoke_setup_template_saved.png` | 1つのテンプレートを取得した状態 | TUTORIAL |
 | `invoke_setup_templates_complete.png` | 複数テンプレート取得後の状態 | TUTORIAL |
 | `invoke_setup_missing_template.png` | テンプレート未取得時のメッセージ | TUTORIAL |
-| `three_panes.png` | 3 ペインに番号を振った注釈付き画面 | TUTORIAL |
+| `three_panes.jpg` | 3 ペインに番号を振った注釈付き画面 | TUTORIAL |
 | `tiles.png` | タイルを並べた中央ペイン | TUTORIAL |
 | `generation_bar.png` | 生成バー（モデル・解像度・seed など） | TUTORIAL |
-| `first_result.png` | 生成直後・右ペインに履歴が出た状態 | TUTORIAL |
 | `history_map.png` | 履歴マップ（系譜ツリー） | TUTORIAL |
 | `tag_browser.png` | タグブラウザ | MANUAL |
 | `side_panel_history.png` | 右ペイン履歴 | MANUAL |
 | `history_map_full.png` | 履歴マップ全体 | MANUAL |
 | `plan_dialog.png` | マルチモデルプラン編集ダイアログ | MANUAL |
 
-> ヒーロー画像以外のスクリーンショットは、未配置でもドキュメントを読めるように差し込み位置だけを残しています。
+> 未配置のスクリーンショットは、ドキュメントを読めるように差し込み位置だけを残しています。
 
