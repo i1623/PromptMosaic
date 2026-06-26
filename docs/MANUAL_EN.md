@@ -34,7 +34,7 @@ If you are using PromptMosaic for the first time, read the [Tutorial](TUTORIAL_E
 | Prompt | The text sent to Invoke for image generation |
 | Tile | A reusable prompt piece such as a tag, word, or sentence |
 | Bilingual display | A core PromptMosaic workflow: show English prompt text and local-language labels side by side |
-| Translation assistance | Optional local LLM integration, such as LM Studio, for turning words or sentences in your language into English prompt tiles |
+| Translation assistance | Optional LM Studio integration for turning words or sentences in your language into English prompt tiles |
 | Tag | A structured prompt word stored in the tag browser |
 | Tile group | A reusable group of tiles |
 | Prompt text | A longer sentence or paragraph stored for reuse |
@@ -98,7 +98,7 @@ Typical use:
 ### Prompt Text / Tile Groups
 
 Prompt text stores longer reusable sentences.
-Tile groups store reusable sets of tiles.
+Tile groups can be created by stacking tiles with `Shift + drag-and-drop`. Double-click a group header to switch its mode between **All**, **Sequential**, and **Random selection** for variation generation. Saved groups can be placed back into the center pane later.
 
 Use them for common character descriptions, styles, lighting setups, negative prompts, or workflow-specific prompt fragments.
 
@@ -134,9 +134,9 @@ Disabled tiles remain visible but are not sent to Invoke.
 
 ### Translation
 
-PromptMosaic can use an optional local LLM server, such as LM Studio, for translation.
+PromptMosaic can use LM Studio for translation.
 
-Translation can help keep local-language labels and Invoke prompt text aligned. Configure the translation LLM in settings before using this feature.
+Translation can help keep local-language labels and Invoke prompt text aligned. Configure LM Studio in settings before using this feature.
 
 ---
 
@@ -325,7 +325,7 @@ Open settings with the gear button.
 
 - **Invoke URL** - default `http://localhost:9090`.
 - **Queue ID** - default `default`.
-- **Translation LLM / classification LLM** - URL, model, prompts, temperature, and seed for LM Studio or another compatible local LLM server.
+- **LM Studio** - URL, model, prompts, temperature, and seed used for translation and automatic classification.
 
 ### Generation Management
 
@@ -429,4 +429,3 @@ Status indicators: connected, disconnected, and checking.
 - [README](../README_EN.md)
 - [Tutorial](TUTORIAL_EN.md)
 - [Screenshot placeholders](images/README_EN.md)
-

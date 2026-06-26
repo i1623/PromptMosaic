@@ -32,7 +32,7 @@ PromptMosaic is a companion GUI for Invoke. It was built around editing English 
 - Manage prompts as reusable **tiles**.
 - Use PromptMosaic side by side with Invoke, with the Invoke viewer on one side and prompt editing, history, and regeneration controls on the other.
 - View English prompt text and local-language labels together.
-- Use a translation LLM such as LM Studio to turn words or sentences in your language into English prompt tiles.
+- Use LM Studio to turn words or sentences in your language into English prompt tiles.
 - Organize tags, prompt text, and tile groups.
 - Send generation jobs to Invoke.
 - Review generation history and branch from past results.
@@ -212,7 +212,7 @@ This can be the fastest way to start when you already have an Invoke image you w
 
 ### Optional Translation
 
-If you configure a translation LLM such as LM Studio, you can create English prompt tiles from your own language.
+If you configure LM Studio, you can create English prompt tiles from your own language.
 
 - **Translate+Add Words** - translate words or short phrases into English tag tiles.
 - **Translate+Add Text** - translate a sentence into an English prompt text tile.

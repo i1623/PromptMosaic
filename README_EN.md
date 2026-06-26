@@ -5,7 +5,7 @@
 [Japanese](README.md) | [English](README_EN.md)
 
 **PromptMosaic** is a local prompt management and generation GUI for the image generation tool [Invoke](https://invoke.ai/).
-It is intended to run next to Invoke: keep Invoke open beside it, then use PromptMosaic for generation instructions, prompt editing, and history management. It is designed around editing English prompts while showing local-language labels, such as Japanese, side by side. If you configure a local LLM such as LM Studio for translation, PromptMosaic can turn words or sentences in your language into English prompt tiles. Image generation itself is performed by Invoke.
+It is intended to run next to Invoke: keep Invoke open beside it, then use PromptMosaic for generation instructions, prompt editing, and history management. It is designed around editing English prompts while showing local-language labels, such as Japanese, side by side. If you configure LM Studio for translation, PromptMosaic can turn words or sentences in your language into English prompt tiles. Image generation itself is performed by Invoke.
 
 - **Run beside Invoke** - keep Invoke open beside PromptMosaic, then use PromptMosaic for generation instructions, prompt editing, and history management.
 
@@ -15,11 +15,11 @@ It is intended to run next to Invoke: keep Invoke open beside it, then use Promp
 
   <img src="docs/images/bilingual_tiles.png" alt="Bilingual prompt tiles" width="420">
 
-- **Tile groups** - group tiles together and use them for variation generation with all, sequential, or random selection modes. Tile groups support drag-and-drop and can be saved for reuse.
+- **Tile groups** - stack tiles with Shift+drag-and-drop to create a group. Double-click the group header to change its mode, then use All, Sequential, or Random selection for variation generation. Groups can be saved for reuse.
 
   <img src="docs/images/tile_group.png" alt="Prompt tile group" width="420">
 
-- **Translation assistance** - use a local LLM such as LM Studio to convert words or sentences into English prompt tiles.
+- **Translation assistance** - use LM Studio to convert words or sentences into English prompt tiles.
 - **Generation lineage / parallel-world history map** - visualize which generations branched from which results and jump back to any past point.
 
   <img src="docs/images/lineage_map.png" alt="Generation lineage history map" width="560">
@@ -127,9 +127,9 @@ PromptMosaic is built on many excellent open-source projects. Deep thanks to the
 
 ### Invoke
 
-PromptMosaic does not generate images by itself. All actual image generation is handled by **[Invoke](https://invoke.ai/)** and the Invoke community. PromptMosaic fetches Invoke txt2img workflow graphs as **generation templates**, replaces only the prompt, seed, and known parameter fields, and submits the result to the Invoke queue.
+PromptMosaic does not generate images by itself. All actual image generation is handled by **[Invoke](https://invoke.ai/)**. PromptMosaic fetches Invoke txt2img workflow graphs as **generation templates**, replaces only the prompt, seed, and known parameter fields, and submits the result to the Invoke queue.
 
-This application would not exist without the long-running work of the Invoke developers and contributors. Tile emphasis supports a subset of Invoke / Compel-style `+` / `-` and numeric weights, but PromptMosaic does not implement or guarantee the full Compel syntax.
+This application would not exist without the long-running work of the Invoke developers and contributors. Thank you sincerely.
 
 ### UI Framework and Color Theme
 
@@ -153,6 +153,6 @@ This application would not exist without the long-running work of the Invoke dev
 
 ### Optional Integration
 
-- **[LM Studio](https://lmstudio.ai/)** - optional local LLM server for prompt translation and automatic classification.
+- **[LM Studio](https://lmstudio.ai/)** - optional local LLM server for prompt translation and automatic classification. Thanks to the LM Studio team and community for providing an approachable local LLM runtime and model-management environment.
 
 > When redistributing, follow the license terms of each dependency. Pay special attention to the LGPL/GPL terms for PySide6 / shiboken6.
