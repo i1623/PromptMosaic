@@ -6,6 +6,7 @@
 
 ## Latest Update: v1.5.0
 
+- Fixed an updater bug where an old `update_windows.bat` could fail because it misdetected an invalid `.git` folder as a Git checkout. If the update fails, save only `update_windows.bat` again from GitHub **Raw**, or copy only `update_windows.bat` from the v1.5.0 ZIP into your existing PromptMosaic folder, then run it again.
 - Added draft nodes to the history map, allowing the pre-generation editing state to be saved as an image-less history node.
 - Images generated from a draft are connected as child nodes in the history map.
 - Added draft rows to the right-side history pane, with history tile view and prompt-tile drag and drop support.
