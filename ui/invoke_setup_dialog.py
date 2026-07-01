@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
     QToolButton,
     QWidget,
     QFrame,
+    QFileDialog,
+    QLineEdit,
     QTableWidget,
     QTableWidgetItem,
     QHeaderView,
@@ -146,6 +148,26 @@ class InvokeSetupDialog(QDialog):
             f"color: {SUBTEXT}; background: {SURFACE0}; padding: 8px; border-radius: 4px;"
         )
         s1.addWidget(self._conn_label)
+
+        output_row = QHBoxLayout()
+        self._outputs_label = QLabel(tr("invoke_setup.outputs_dir_label"))
+        self._outputs_label.setStyleSheet(f"color: {SUBTEXT}; background: transparent;")
+        output_row.addWidget(self._outputs_label)
+        self._outputs_edit = QLineEdit()
+        self._outputs_edit.setText(self._outputs_dir())
+        self._outputs_edit.setPlaceholderText(tr("invoke_setup.outputs_dir_placeholder"))
+        self._outputs_edit.setStyleSheet(
+            f"QLineEdit {{ background: {SURFACE0}; color: {TEXT}; "
+            f"border: 1px solid {SURFACE2}; border-radius: 4px; padding: 5px; }}"
+        )
+        self._outputs_edit.editingFinished.connect(self._save_outputs_dir)
+        output_row.addWidget(self._outputs_edit, stretch=1)
+        self._outputs_browse_btn = QPushButton(tr("invoke_setup.outputs_dir_browse"))
+        self._outputs_browse_btn.setStyleSheet(themed_button_style("neutral"))
+        self._outputs_browse_btn.clicked.connect(self._browse_outputs_dir)
+        output_row.addWidget(self._outputs_browse_btn)
+        s1.addLayout(output_row)
+
         self._retry_btn = QPushButton(tr("invoke_setup.retry"))
         self._retry_btn.clicked.connect(self._check_connection)
         rrow = QHBoxLayout()
@@ -232,6 +254,32 @@ class InvokeSetupDialog(QDialog):
             + ("" if enabled else f"QFrame {{ color: {SUBTEXT}; }}")
         )
 
+    def _outputs_dir(self) -> str:
+        row = _env_db.fetchone("SELECT value FROM env_settings WHERE key='invoke_outputs_dir'")
+        return str(row["value"] or "").strip() if row else ""
+
+    def _save_outputs_dir(self) -> None:
+        value = self._outputs_edit.text().strip()
+        if value:
+            _env_db.execute(
+                "INSERT OR REPLACE INTO env_settings (key, value) VALUES (?, ?)",
+                ("invoke_outputs_dir", value),
+            )
+        else:
+            _env_db.execute("DELETE FROM env_settings WHERE key='invoke_outputs_dir'")
+        self.setup_changed.emit()
+
+    def _browse_outputs_dir(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            tr("invoke_setup.outputs_dir_dialog_title"),
+            self._outputs_edit.text().strip(),
+        )
+        if not folder:
+            return
+        self._outputs_edit.setText(folder)
+        self._save_outputs_dir()
+
     # ── 言語 ────────────────────────────────────────────
     def _populate_language_combo(self, selected: str) -> None:
         self._lang_combo.blockSignals(True)
@@ -266,6 +314,9 @@ class InvokeSetupDialog(QDialog):
         self._step2_box._title_label.setText(tr("invoke_setup.step2_title"))  # type: ignore[attr-defined]
         self._step2_info.setText(tr("invoke_setup.step2_info"))
         self._step2_warn.setText(tr("invoke_setup.step2_lora_note"))
+        self._outputs_label.setText(tr("invoke_setup.outputs_dir_label"))
+        self._outputs_edit.setPlaceholderText(tr("invoke_setup.outputs_dir_placeholder"))
+        self._outputs_browse_btn.setText(tr("invoke_setup.outputs_dir_browse"))
         self._retry_btn.setText(tr("invoke_setup.retry"))
         self._table.setHorizontalHeaderLabels([
             "", tr("invoke_setup.col_base"), tr("invoke_setup.col_name"), "",

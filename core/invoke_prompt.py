@@ -2,15 +2,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 from core.prompt_builder import GroupTile, NaturalTextTile, TagTile
 from core.text_sanitize import single_line_text
+
+
+_DYNAMIC_WILDCARD_RE = re.compile(r"(?<!_)__[A-Za-z0-9][A-Za-z0-9_\-/ .]*__(?!_)")
 
 
 @dataclass(frozen=True)
 class _Weight:
     strength_level: int = 0
     emphasis: float = 1.0
+
+
+def looks_like_dynamic_prompt(prompt: str) -> bool:
+    """Return True when a prompt appears to contain InvokeAI dynamic prompt syntax."""
+    text = prompt or ""
+    if _DYNAMIC_WILDCARD_RE.search(text):
+        return True
+    return _has_dynamic_variant_group(text)
 
 
 def parse_invoke_prompt(prompt: str) -> list:
@@ -24,6 +36,42 @@ def parse_invoke_prompt(prompt: str) -> list:
     for part in _split_top_level_commas(prompt or ""):
         tiles.extend(_parse_part(part))
     return tiles
+
+
+def _has_dynamic_variant_group(text: str) -> bool:
+    depth = 0
+    quote = ""
+    escape = False
+    group_has_pipe: list[bool] = []
+
+    for ch in text:
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if quote:
+            if ch == quote:
+                quote = ""
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            continue
+        if ch == "{":
+            depth += 1
+            group_has_pipe.append(False)
+            continue
+        if ch == "}" and depth > 0:
+            has_pipe = group_has_pipe.pop()
+            depth -= 1
+            if has_pipe:
+                return True
+            continue
+        if ch == "|" and depth > 0:
+            group_has_pipe[-1] = True
+
+    return False
 
 
 def _parse_part(part: str) -> list:

@@ -201,11 +201,10 @@ def ensure_default_generation_group(history_name: str | None = None) -> int:
     if row:
         return int(row["id"])
 
-    images_dir = Path(__file__).parent.parent / "images" / "Default"
     cur = conn.execute(
         "INSERT INTO generation_groups (name, parent_id, sort_order, folder_path) "
         "VALUES (?, NULL, 0, ?)",
-        ("Default", str(images_dir)),
+        ("Default", None),
     )
     conn.commit()
     return int(cur.lastrowid)

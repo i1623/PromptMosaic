@@ -2,7 +2,7 @@
 ローカル画像ストレージ管理
 
 generation_groups.folder_path を親方向に辿って保存先を解決し、
-Invoke から取得した画像バイト列をコピーする。
+ユーザーが明示した場合だけ Invoke から取得した画像バイト列をコピーする。
 サムネイルは DB の BLOB として管理するため、このモジュールは扱わない。
 """
 from __future__ import annotations
@@ -29,11 +29,14 @@ def get_root_dir() -> Path:
 
 def default_group_folder(name: str, parent_id: int | None = None) -> Path:
     """新規グループ用の物理保存先フォルダを返す。"""
-    safe_name = "".join(c for c in name.strip() if c not in '<>:"/\\|?*').strip()
-    if not safe_name:
-        safe_name = "group"
+    safe_name = _safe_folder_name(name)
     parent_dir = resolve_folder_path(parent_id) if parent_id is not None else get_root_dir()
     return parent_dir / safe_name
+
+
+def _safe_folder_name(name: str) -> str:
+    safe_name = "".join(c for c in name.strip() if c not in '<>:"/\\|?*').strip()
+    return safe_name or "group"
 
 
 def resolve_folder_path(group_id: int | None, db=None) -> Path:
@@ -104,5 +107,65 @@ def has_group_folder(group_id: int | None, db=None) -> bool:
             return True
         current_id = row["parent_id"]
     return False
+
+
+def should_copy_generated_images(group_id: int | None, db=None) -> bool:
+    """Return True only when the group has a user-specified image folder.
+
+    Older public DBs may already contain auto-generated paths such as
+    ``images/Default`` in generation_groups.folder_path. Those paths used to
+    make PromptMosaic copy every generated image by default. Treat paths under
+    the app's default images root as implicit defaults, not an explicit copy
+    request. A folder outside that default root remains an explicit copy target.
+    """
+    found = _first_group_folder(group_id, db=db)
+    if found is None:
+        return False
+    folder_id, folder = found
+    hdb = db if db is not None else _history_db
+    implicit = _implicit_default_folder_for_group(folder_id, hdb)
+    try:
+        return folder.resolve() != implicit.resolve()
+    except Exception:
+        try:
+            return str(folder) != str(implicit)
+        except Exception:
+            return True
+
+
+def _first_group_folder(group_id: int | None, db=None) -> tuple[int, Path] | None:
+    if group_id is None:
+        return None
+    hdb = db if db is not None else _history_db
+    current_id: int | None = group_id
+    while current_id is not None:
+        row = hdb.fetchone(
+            "SELECT folder_path, parent_id FROM generation_groups WHERE id=?",
+            (current_id,),
+        )
+        if not row:
+            break
+        if row["folder_path"]:
+            return current_id, Path(row["folder_path"])
+        current_id = row["parent_id"]
+    return None
+
+
+def _implicit_default_folder_for_group(group_id: int, db) -> Path:
+    parts: list[str] = []
+    current_id: int | None = group_id
+    while current_id is not None:
+        row = db.fetchone(
+            "SELECT name, parent_id FROM generation_groups WHERE id=?",
+            (current_id,),
+        )
+        if not row:
+            break
+        parts.append(_safe_folder_name(row["name"] or "group"))
+        current_id = row["parent_id"]
+    path = get_root_dir()
+    for part in reversed(parts):
+        path = path / part
+    return path
 
 

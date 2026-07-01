@@ -233,7 +233,7 @@ def _ensure_group_path(conn, parts: list[str], save_folder_path: str | None) -> 
                 (
                     name,
                     parent_id,
-                    str(_default_group_folder(name, parent_id)),
+                    None,
                 ),
             )
             group_id = int(cur.lastrowid)

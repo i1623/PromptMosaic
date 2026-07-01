@@ -21,7 +21,7 @@ from PySide6.QtGui import QFont, QPixmap, QImageWriter, QCloseEvent
 
 import db.env_db as _env_db
 import db.history_db as _history_db
-import core.local_storage as local_storage
+from core.image_resolver import resolve_generation_image_path
 from core.i18n import tr
 from ui.star_widget import StarWidget
 from ui.styles import SURFACE0, SURFACE1, SURFACE2, TEXT, SUBTEXT, ACCENT, GREEN, RED, themed_button_style
@@ -407,10 +407,10 @@ class ReviewDialog(QDialog):
                 self._thumb_label.setText("")
                 return
 
-        if not self._row or not self._row["invoke_image_name"]:
+        if not self._row:
             return
 
-        data = self._fetch_and_store_thumb(self._row["invoke_image_name"])
+        data = self._fetch_and_store_thumb(self._row["invoke_image_name"] or "")
         if data is None:
             return
 
@@ -425,12 +425,23 @@ class ReviewDialog(QDialog):
 
     def _fetch_and_store_thumb(self, image_name: str) -> bytes | None:
         """API からサムネイルを取得し、圧縮して DB に保存してバイト列を返す。"""
-        if self._client is None:
-            return None
+        raw: bytes | None = None
         try:
-            raw = self._client.image_thumbnail(image_name)
+            if self._client is not None and image_name:
+                raw = self._client.image_thumbnail(image_name)
         except Exception:
-            return None
+            raw = None
+        if raw is None:
+            image_path = resolve_generation_image_path(
+                self._row["local_path"] if self._row else "",
+                image_name,
+            )
+            if image_path is None:
+                return None
+            try:
+                raw = image_path.read_bytes()
+            except Exception:
+                return None
         from PIL import Image
         img = Image.open(io.BytesIO(raw))
         img.thumbnail((256, 256))
