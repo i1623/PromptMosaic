@@ -4,6 +4,25 @@
 
 [Japanese](README.md) | [English](README_EN.md)
 
+## Latest Update: v1.5.0
+
+- Added draft nodes to the history map, allowing the pre-generation editing state to be saved as an image-less history node.
+- Images generated from a draft are connected as child nodes in the history map.
+- Added draft rows to the right-side history pane, with history tile view and prompt-tile drag and drop support.
+- Draft nodes without child nodes can now be deleted, while draft nodes with child nodes are protected to preserve lineage.
+- Deleted image history entries remain in the history map as deleted nodes to preserve lineage.
+- Added drag-and-drop lineage reconnection in the history map, available in both the expanded history map and the center-pane history map.
+- Moving a parent node now moves its descendants together while preserving lineage.
+- Added a setting for the Invoke installation path.
+- When the Invoke image path is not configured, the history-map image viewer now shows that setup is required and can open the Invoke path settings.
+- Added support for Invoke's nested image output folder structure.
+- Added image path display and an open-image-folder action to the history-map image viewer.
+- Added localization support for the default Invoke destination board label, history map, center-pane history map, and image viewer text.
+- Updated all language resources.
+- Improved responsiveness when returning from history tile mode to normal view and when restoring a previous history tile mode session at startup.
+
+---
+
 **PromptMosaic** is a local prompt management and generation GUI for the image generation tool [Invoke](https://invoke.ai/).
 It is intended to run next to Invoke: keep Invoke open beside it, then use PromptMosaic for generation instructions, prompt editing, and history management. It is designed around editing English prompts while showing local-language labels, such as Japanese, side by side. If you configure LM Studio for translation, PromptMosaic can turn words or sentences in your language into English prompt tiles. Image generation itself is performed by Invoke.
 
@@ -28,7 +47,7 @@ It is intended to run next to Invoke: keep Invoke open beside it, then use Promp
 - **11 languages** - Japanese, English, Chinese (Simplified / Traditional), Korean, German, French, Spanish, Italian, Portuguese (Brazil), and Russian.
 - **Simple data backup** - back up PromptMosaic by copying the entire `data` folder.
 
-> **Version:** 1.4.10
+> **Version:** 1.5.0
 > **Target Invoke:** 6.13 or later
 > **Supported OS:** Windows 11 (PySide6 / Python 3.11 recommended)
 
