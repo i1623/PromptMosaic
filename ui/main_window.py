@@ -19,6 +19,7 @@ import json
 import hashlib
 import random
 import sys
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QSplitter, QToolBar, QTabWidget,
@@ -29,10 +30,11 @@ from PySide6.QtWidgets import (
     QFileDialog, QProgressDialog, QScrollArea, QFrame,
 )
 from PySide6.QtCore import Qt, QTimer, QSize, QUrl, QThread, Signal, QEvent, QPropertyAnimation
-from PySide6.QtGui import QFont, QAction, QIcon, QDragEnterEvent, QDropEvent, QTextCursor, QPixmap
+from PySide6.QtGui import QFont, QAction, QDragEnterEvent, QDropEvent, QTextCursor, QPixmap
 
 from api.invoke_client import InvokeClient, InvokeConnectionError
-from core.invoke_prompt import parse_invoke_prompt
+from core.invoke_prompt import looks_like_dynamic_prompt, parse_invoke_prompt
+from core.image_resolver import invoke_image_roots, resolve_generation_image_path
 from core.prompt_builder import GroupTile, NaturalTextTile, PromptDocument, TagTile
 from core.png_meta import read_png_meta
 from core.i18n import set_language, tr
@@ -208,120 +210,6 @@ class _WidePopupComboBox(QComboBox):
         super().hidePopup()
 
 
-class _AdoptHistoryDialog(QDialog):
-    """履歴行を、選択した履歴マップノードの子として単独接続するダイアログ。"""
-
-    def __init__(self, adoptee: dict, candidates: list[dict], parent=None):
-        super().__init__(parent)
-        self._adoptee = adoptee
-        self._candidates = candidates
-        self._selected_parent: tuple[str, int] | None = None
-        self.setWindowTitle(tr("adopt_history.title"))
-        self.resize(560, 520)
-        geo = _get_setting("adopt_history_geometry", "")
-        if geo:
-            try:
-                from PySide6.QtCore import QByteArray
-                self.restoreGeometry(QByteArray.fromHex(geo.encode("ascii")))
-            except Exception:
-                pass
-
-        root = QVBoxLayout(self)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(8)
-        body = QHBoxLayout()
-        body.setSpacing(10)
-        root.addLayout(body, stretch=1)
-
-        self._scroll = QScrollArea()
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
-        holder = QWidget()
-        self._list_lay = QVBoxLayout(holder)
-        self._list_lay.setContentsMargins(2, 2, 2, 2)
-        self._list_lay.setSpacing(6)
-        self._list_lay.addStretch(1)
-        self._scroll.setWidget(holder)
-        body.addWidget(self._scroll, stretch=1)
-
-        side = QFrame()
-        side.setFixedWidth(190)
-        side.setStyleSheet(
-            f"QFrame {{ background: {SURFACE1}; border: 1px solid {SURFACE2}; border-radius: 4px; }}"
-            f"QLabel {{ color: {TEXT}; background: transparent; border: none; }}"
-        )
-        side_lay = QVBoxLayout(side)
-        side_lay.setContentsMargins(8, 8, 8, 8)
-        side_lay.setSpacing(8)
-        self._selected_lbl = QLabel(tr("adopt_history.no_parent"))
-        self._selected_lbl.setWordWrap(True)
-        side_lay.addWidget(self._selected_lbl)
-        side_lay.addWidget(self._thumb_label_for(adoptee, 96), alignment=Qt.AlignmentFlag.AlignCenter)
-        self._adoptee_lbl = QLabel(tr("adopt_history.adoptee_label", n=adoptee["history_id"]))
-        self._adoptee_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        side_lay.addWidget(self._adoptee_lbl)
-        side_lay.addStretch(1)
-        self._ok_btn = QPushButton(tr("adopt_history.apply"))
-        self._ok_btn.setEnabled(False)
-        self._ok_btn.clicked.connect(self.accept)
-        side_lay.addWidget(self._ok_btn)
-        body.addWidget(side)
-
-        for row in candidates:
-            self._add_candidate(row)
-
-    def closeEvent(self, event) -> None:
-        _set_setting("adopt_history_geometry", bytes(self.saveGeometry().toHex()).decode("ascii"))
-        super().closeEvent(event)
-
-    def accept(self) -> None:
-        _set_setting("adopt_history_geometry", bytes(self.saveGeometry().toHex()).decode("ascii"))
-        super().accept()
-
-    def selected_parent(self) -> tuple[str, int] | None:
-        return self._selected_parent
-
-    def _thumb_label_for(self, row: dict, size: int) -> QLabel:
-        lbl = QLabel()
-        lbl.setFixedSize(size, size)
-        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        pix = QPixmap()
-        data = row.get("thumbnail_data")
-        if data and pix.loadFromData(bytes(data)) and not pix.isNull():
-            lbl.setPixmap(pix.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-        else:
-            lbl.setText("🖼")
-        lbl.setStyleSheet(f"background: {SURFACE0}; color: {SUBTEXT}; border: 1px solid {SURFACE2}; border-radius: 3px;")
-        return lbl
-
-    def _add_candidate(self, row: dict) -> None:
-        if (row["history_db"], row["history_id"]) == (self._adoptee["history_db"], self._adoptee["history_id"]):
-            return
-        btn = QToolButton()
-        btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        btn.setText(tr("adopt_history.candidate_label", n=row["history_id"]))
-        btn.setCheckable(True)
-        btn.setAutoExclusive(True)
-        pix = QPixmap()
-        data = row.get("thumbnail_data")
-        if data and pix.loadFromData(bytes(data)) and not pix.isNull():
-            btn.setIcon(QIcon(pix))
-            btn.setIconSize(QSize(96, 96))
-        btn.setMinimumHeight(108)
-        btn.setStyleSheet(
-            f"QToolButton {{ background: {SURFACE1}; color: {TEXT}; border: 1px solid {SURFACE2}; border-radius: 4px; padding: 4px; }}"
-            f"QToolButton:checked {{ border: 2px solid {GREEN}; background: {SURFACE2}; }}"
-            f"QToolButton:hover {{ border-color: {ACCENT}; }}"
-        )
-        btn.clicked.connect(lambda _=False, r=row: self._select_parent(r))
-        self._list_lay.insertWidget(max(0, self._list_lay.count() - 1), btn)
-
-    def _select_parent(self, row: dict) -> None:
-        self._selected_parent = (str(row["history_db"]), int(row["history_id"]))
-        self._selected_lbl.setText(tr("adopt_history.parent_label", n=row["history_id"]))
-        self._ok_btn.setEnabled(True)
-
-
 # ── UTC タイムスタンプ変換（複数ワーカーから共用） ────────────────────────
 
 def _utc_to_local(ts: str) -> str:
@@ -386,30 +274,6 @@ class _BoardListWorker(QThread):
             self.loaded.emit(self._client.boards_list(limit=200))
         except Exception as exc:
             self.failed.emit(str(exc))
-
-
-class _NodeFullImageWorker(QThread):
-    """履歴マップのプレビュー用フル画像を Invoke からバックグラウンド取得する。
-
-    ノードクリック時はまずローカル/サムネイルを即時表示し、フル画像はこのワーカーで
-    取得して後から差し替える（UIスレッドを同期 HTTP でブロックしないため）。
-    """
-
-    loaded = Signal(object, object)  # (node_key, image_bytes)
-
-    def __init__(self, client: "InvokeClient", node_key, image_name: str, parent=None):
-        super().__init__(parent)
-        self._client = client
-        self._node_key = node_key
-        self._image_name = image_name
-
-    def run(self) -> None:
-        try:
-            data = self._client.image_full(self._image_name)
-        except Exception:
-            return
-        if data:
-            self.loaded.emit(self._node_key, data)
 
 
 # ── 履歴バックフィル同期ワーカー ──────────────────────────────────────────
@@ -503,10 +367,10 @@ class _HistorySyncWorker(QThread):
             )
             done_item_ids = {r["invoke_item_id"] for r in existing}
 
-            # 保存先フォルダ確認（一度だけ）
-            has_local = local_storage.has_group_folder(group_id, db=hdb)
-            dest_dir  = local_storage.resolve_folder_path(group_id, db=hdb) if has_local else None
-            if has_local and dest_dir and not local_storage.is_drive_accessible(dest_dir):
+            # 保存先フォルダ確認（一度だけ）。既定の images/ 配下は暗黙値なのでコピーしない。
+            copy_local = local_storage.should_copy_generated_images(group_id, db=hdb)
+            dest_dir  = local_storage.resolve_folder_path(group_id, db=hdb) if copy_local else None
+            if copy_local and dest_dir and not local_storage.is_drive_accessible(dest_dir):
                 self.copy_failed.emit(
                     f"保存先ドライブにアクセスできません: {dest_dir}"
                 )
@@ -537,6 +401,13 @@ class _HistorySyncWorker(QThread):
                             gen_still_pending = True  # 完了だが画像がない → 異常系、様子見
                             continue
 
+                        image_subfolder = ""
+                        try:
+                            image_info = self._client.image_info(image_name)
+                            image_subfolder = str(image_info.get("image_subfolder") or "").strip()
+                        except Exception:
+                            image_subfolder = ""
+
                         # ローカル保存
                         saved_local: str | None = None
                         if dest_dir:
@@ -549,6 +420,12 @@ class _HistorySyncWorker(QThread):
                             except OSError as e:
                                 self.copy_failed.emit(str(e))
                                 return
+                        else:
+                            resolved = resolve_generation_image_path(
+                                image_name=image_name,
+                                image_subfolder=image_subfolder,
+                            )
+                            saved_local = str(resolved) if resolved else None
 
                         # generation_images に記録
                         sort_order = item_order_map.get(item_id)
@@ -978,6 +855,8 @@ class MainWindow(QMainWindow):
         self._history_map_dialog = None
         self._history_map_dialog_focus: tuple[str, int] | None = None
         self._history_map_opened_node: tuple[str, int] | None = None
+        self._editor_history_session_parent: tuple[str, int] | None = None
+        self._editor_history_session_draft: tuple[str, int] | None = None
         # 「ここ以下のみ表示」の起点（None=全体表示）
         self._history_map_view_root: tuple[str, int] | None = self._settings_node_key("history_map_view_root")
         self._generation_busy = False
@@ -1791,6 +1670,20 @@ class MainWindow(QMainWindow):
         self._board_combo.blockSignals(False)
         self._board_combo.adjust_to_current_text()
 
+    def _retranslate_board_combo(self) -> None:
+        """言語変更時に、Invoke保存先コンボの固定項目を現在言語へ更新する。"""
+        if not hasattr(self, "_board_combo"):
+            return
+        current_board_id = self._current_board_id()
+        if self._boards:
+            self._apply_board_list(self._boards)
+        else:
+            self._restore_board_selection()
+        if current_board_id:
+            idx = self._board_combo.findData(current_board_id)
+            if idx >= 0:
+                self._board_combo.setCurrentIndex(idx)
+
     def _on_board_combo_changed(self, _index: int) -> None:
         board_id = self._current_board_id() or ""
         _app_db.execute(
@@ -2084,6 +1977,7 @@ class MainWindow(QMainWindow):
             parent_child_map.bulk_erase_requested.connect(self._bulk_erase_editor_history_nodes)
             parent_child_map.bulk_delete_requested.connect(self._bulk_delete_editor_history_nodes)
             parent_child_map.reparent_requested.connect(self._reparent_editor_history_node)
+            parent_child_map.setup_requested.connect(self._open_invoke_setup)
         QTimer.singleShot(0, self._refresh_lineage_card)
         QTimer.singleShot(0, self._refresh_history_stack_buttons)
         # 前回履歴マップを開いたまま終了していたら再現する
@@ -2095,13 +1989,17 @@ class MainWindow(QMainWindow):
         self._side_panel = SidePanel(client=self._client)
         self._side_panel.setMinimumWidth(200)
         self._side_panel.load_generation_requested.connect(self._load_generation)
+        self._side_panel.load_draft_requested.connect(self._load_draft_from_side_panel)
+        self._side_panel.delete_draft_requested.connect(
+            lambda owner, did: self._delete_editor_history_draft_single(f"draft:{owner}", int(did))
+        )
         self._side_panel.full_load_generation_requested.connect(self._full_load_generation)
         self._side_panel.sync_history_requested.connect(self._sync_history)
         self._side_panel.group_focus_changed.connect(self._on_group_focus_changed)
         self._side_panel.history_tile_mode_changed.connect(self._on_history_tile_mode_changed)
         self._side_panel.history_tile_generation_changed.connect(self._on_history_tile_generation_changed)
         self._side_panel.history_map_requested.connect(self._open_history_map)
-        self._side_panel.history_reconnect_requested.connect(self._open_adopt_history_dialog)
+        self._side_panel.draft_history_map_requested.connect(self._open_draft_history_map)
         self._side_panel.history_changed.connect(self._on_history_rows_changed)
         self._splitter.addWidget(self._side_panel)
 
@@ -2173,6 +2071,9 @@ class MainWindow(QMainWindow):
 
     def _on_history_tile_generation_changed(self, generation_id) -> None:
         if generation_id is None:
+            self._lora_bar.set_split_mode(False)
+            return
+        if isinstance(generation_id, (tuple, list)) and generation_id and generation_id[0] == "draft":
             self._lora_bar.set_split_mode(False)
             return
         loras = self._history_loras_for_generation(int(generation_id))
@@ -2442,6 +2343,7 @@ class MainWindow(QMainWindow):
             return
 
         live_doc = self._editor.document
+        draft_doc = live_doc.clone()
         live_doc.reset_selection_log()
         base_neg = self._effective_negative_prompt()
         base_pos: list[str] = []
@@ -2464,7 +2366,7 @@ class MainWindow(QMainWindow):
         seeds = self._build_seeds(base_seed, seed_fixed, max_count)
 
         self._ensure_current_group()
-        if record_mode != "none" and local_storage.has_group_folder(self._current_group_id):
+        if record_mode != "none" and local_storage.should_copy_generated_images(self._current_group_id):
             dest = local_storage.resolve_folder_path(self._current_group_id)
             if not local_storage.is_drive_accessible(dest):
                 QMessageBox.warning(
@@ -2571,7 +2473,9 @@ class MainWindow(QMainWindow):
             )
             seq += 1
 
+        draft_key = None
         if all_gen_ids and record_map:
+            draft_key = self._ensure_editor_history_draft_for_generation(draft_doc)
             if record_mode == "all" or len(all_gen_ids) > 1:
                 import db.hmap_db as _hmap_db
                 from db.connections import get_active_history_name as _gahn
@@ -2591,7 +2495,11 @@ class MainWindow(QMainWindow):
             self._refresh_lineage_card()
             self._refresh_history_map_dialog()
 
-        self._apply_selection_to_live_doc(first_sel)
+        if self._is_draft_history_key(draft_key):
+            self._editor.set_document(draft_doc)
+            self._editor_dirty = False
+        else:
+            self._apply_selection_to_live_doc(first_sel)
         self._editor.set_preview_text(base_pos[0], base_neg)
         self._side_panel.refresh_history()
         self._start_send_queue()
@@ -2734,6 +2642,7 @@ class MainWindow(QMainWindow):
         # 各回の「選択されたタイル」を子の履歴スナップショットとして退避する
         # （親=中央ペインのドキュメントは不変。子は選択タイルのみON・他OFFで記録）。
         live_doc = self._editor.document
+        draft_doc = live_doc.clone()
         live_doc.reset_selection_log()
         neg = self._effective_negative_prompt()  # 先に1回（ネガ側の選択も記録に含める）
         pos_list: list[str] = []
@@ -2761,7 +2670,7 @@ class MainWindow(QMainWindow):
 
         # ── 保存先ドライブの事前チェック ──────────────────────
         self._ensure_current_group()
-        if local_storage.has_group_folder(self._current_group_id):
+        if local_storage.should_copy_generated_images(self._current_group_id):
             _dest = local_storage.resolve_folder_path(self._current_group_id)
             if not local_storage.is_drive_accessible(_dest):
                 QMessageBox.warning(
@@ -2833,7 +2742,9 @@ class MainWindow(QMainWindow):
             snap_docs[0].save_to_db(gid)
             _save_memo(gid)
 
+        draft_key = None
         if gen_ids and record_map:
+            draft_key = self._ensure_editor_history_draft_for_generation(draft_doc)
             if record_mode == "all" and len(gen_ids) > 1:
                 # 系譜: 全行を「同じ親から並列の子」として記録する。
                 # _record_editor_history_node を行ごとに呼ぶと current が移動して
@@ -2856,9 +2767,13 @@ class MainWindow(QMainWindow):
             self._refresh_lineage_card()
             self._refresh_history_map_dialog()
 
-        # 中央ペインの選択状態は生成時スナップショットに合わせるが、
-        # current は自動で子へ移動しない（明示操作でだけ移動する）。
-        self._apply_selection_to_live_doc(first_sel)
+        # ドラフトを親にした生成では中央ペインをドラフト状態のまま保つ。
+        # ドラフトを作らない通常生成だけ、従来通り1枚目の選択状態を反映する。
+        if self._is_draft_history_key(draft_key):
+            self._editor.set_document(draft_doc)
+            self._editor_dirty = False
+        else:
+            self._apply_selection_to_live_doc(first_sel)
         self._editor.set_preview_text(pos_list[0], neg)  # プレビューは実送信文字列を維持
 
         self._side_panel.refresh_history()
@@ -3379,6 +3294,12 @@ class MainWindow(QMainWindow):
         self._populate_model_combo()
         self._apply_model_mode_ui()
         self._update_generation_buttons()
+        viewer = self._open_image_viewer()
+        key = getattr(viewer, "_node_key", None) if viewer is not None else None
+        if key is not None:
+            self._show_history_map_node_preview(
+                key[0], int(key[1]), activate_viewer=False, set_focus=False,
+            )
 
     def _on_invoke_setup_language_changed(self) -> None:
         self._apply_runtime_settings()
@@ -3904,6 +3825,22 @@ class MainWindow(QMainWindow):
         """右クリック「全てロード」用エントリポイント。"""
         self._load_generation_impl(generation_id, include_params=True)
 
+    def _load_draft_from_side_panel(self, owner_history_db: str, draft_id: int) -> None:
+        if not self._confirm_load():
+            return
+        self._jump_to_editor_history_draft(
+            f"draft:{owner_history_db}",
+            int(draft_id),
+            from_map=False,
+        )
+
+    def _open_draft_history_map(self, owner_history_db: str, draft_id: int) -> None:
+        key = (f"draft:{owner_history_db}", int(draft_id))
+        self._history_map_dialog_focus = key
+        self._history_map_opened_node = key
+        self._jump_to_editor_history_draft(key[0], key[1], from_map=True)
+        self._open_history_map(activate=True)
+
     def _load_generation_impl(
         self,
         generation_id: int,
@@ -4077,6 +4014,14 @@ class MainWindow(QMainWindow):
             return
         self._seed_editor_history_root(gen_id)
 
+    @staticmethod
+    def _is_draft_history_key(key: tuple[str, int] | None) -> bool:
+        return bool(key and str(key[0]).startswith("draft:"))
+
+    @staticmethod
+    def _draft_owner_history_db(history_db: str) -> str:
+        return str(history_db)[len("draft:"):] if str(history_db).startswith("draft:") else str(history_db)
+
     def _current_editor_history_node(self) -> tuple[str, int] | None:
         db = _get_setting("editor_history_current_history_db", "")
         id_str = _get_setting("editor_history_current_history_id", "")
@@ -4093,8 +4038,87 @@ class MainWindow(QMainWindow):
     ) -> None:
         _set_setting("editor_history_current_history_db", history_db)
         _set_setting("editor_history_current_history_id", str(gen_id))
+        key = (history_db, int(gen_id))
+        if self._is_draft_history_key(key):
+            self._editor_history_session_draft = key
+        else:
+            self._editor_history_session_parent = key
+            self._editor_history_session_draft = None
         if refresh_lineage:
             self._refresh_lineage_card()
+
+    def _draft_group_id_for_parent(self, parent: tuple[str, int]) -> int | None:
+        import db.hmap_db as _hmap_db
+        try:
+            if self._is_draft_history_key(parent):
+                owner = self._draft_owner_history_db(parent[0])
+                row = _hmap_db.fetch_draft_node(owner, int(parent[1]))
+                return int(row["group_id"]) if row is not None and row["group_id"] is not None else None
+            from db.connections import history_db_path
+            if not history_db_path(parent[0]).exists():
+                return self._current_group_id
+            row = _history_db.for_history(parent[0]).fetchone(
+                "SELECT group_id FROM generations WHERE id=?",
+                (int(parent[1]),),
+            )
+            return int(row["group_id"]) if row is not None and row["group_id"] is not None else self._current_group_id
+        except Exception:
+            return self._current_group_id
+
+    def _ensure_editor_history_draft_for_generation(
+        self,
+        doc: PromptDocument,
+    ) -> tuple[str, int] | None:
+        """Save/update the current image-less draft and make it the generation parent."""
+        parent = self._current_editor_history_node()
+        if parent is None:
+            return None
+        if not self._is_draft_history_key(parent) and not self._editor_dirty:
+            return parent
+
+        import db.hmap_db as _hmap_db
+
+        prompt_json = doc.to_json()
+        memo_text = self._editor.get_memo().strip()
+        group_id = self._draft_group_id_for_parent(parent)
+
+        if self._is_draft_history_key(parent):
+            owner = self._draft_owner_history_db(parent[0])
+            draft_row = _hmap_db.fetch_draft_node(owner, int(parent[1]))
+            if draft_row is None:
+                return parent
+            draft_key = _hmap_db.record_draft_node(
+                owner,
+                str(draft_row["parent_db"]),
+                int(draft_row["parent_id"]),
+                prompt_json,
+                memo_text=memo_text,
+                group_id=group_id,
+                title=draft_row["title"] or "Draft",
+                draft_id=int(parent[1]),
+            )
+        else:
+            session_parent = getattr(self, "_editor_history_session_parent", None)
+            session_draft = getattr(self, "_editor_history_session_draft", None)
+            draft_id = None
+            if session_parent == parent and self._is_draft_history_key(session_draft):
+                draft_id = int(session_draft[1])
+            draft_key = _hmap_db.record_draft_node(
+                parent[0],
+                parent[0],
+                int(parent[1]),
+                prompt_json,
+                memo_text=memo_text,
+                group_id=group_id,
+                title="Draft",
+                draft_id=draft_id,
+            )
+
+        self._editor_dirty = False
+        self._set_current_editor_history_node(draft_key[0], int(draft_key[1]))
+        self._history_map_dialog_focus = draft_key
+        self._refresh_history_map_dialog()
+        return draft_key
 
     def _lineage_row_item(self, history_db: str, gen_id: int) -> dict | None:
         from pathlib import Path
@@ -4103,7 +4127,7 @@ class MainWindow(QMainWindow):
             return None
         try:
             row = _history_db.for_history(history_db).fetchone(
-                "SELECT thumbnail_data, local_path, deleted_at FROM generations WHERE id=?",
+                "SELECT thumbnail_data, local_path, invoke_image_name, deleted_at FROM generations WHERE id=?",
                 (gen_id,),
             )
         except Exception:
@@ -4111,9 +4135,12 @@ class MainWindow(QMainWindow):
         if row is None or row["deleted_at"] is not None:
             return None
         preview_pix = None
-        local_path = str(row["local_path"] or "")
-        if local_path and Path(local_path).exists():
-            pix = QPixmap(local_path)
+        image_path = resolve_generation_image_path(
+            row["local_path"],
+            row["invoke_image_name"],
+        )
+        if image_path:
+            pix = QPixmap(str(image_path))
             if not pix.isNull():
                 preview_pix = pix
         return {
@@ -4171,19 +4198,10 @@ class MainWindow(QMainWindow):
     def _history_map_is_single_node(self, history_db: str, gen_id: int) -> bool:
         try:
             import db.hmap_db as _hmap_db
-            node = _hmap_db.fetchone(
-                "SELECT parent_db FROM editor_history_nodes "
-                "WHERE history_db=? AND history_id=?",
-                (history_db, int(gen_id)),
-            )
+            node = _hmap_db.fetch_node(history_db, int(gen_id))
             if node is None or node["parent_db"] is not None:
                 return False
-            child = _hmap_db.fetchone(
-                "SELECT 1 FROM editor_history_nodes "
-                "WHERE parent_db=? AND parent_id=? LIMIT 1",
-                (history_db, int(gen_id)),
-            )
-            return child is None
+            return not _hmap_db.child_keys(history_db, int(gen_id))
         except Exception:
             return False
 
@@ -4350,11 +4368,7 @@ class MainWindow(QMainWindow):
             return
 
         import db.hmap_db as _hmap_db
-        row = _hmap_db.fetchone(
-            "SELECT parent_db, parent_id FROM editor_history_nodes "
-            "WHERE history_db=? AND history_id=?",
-            current,
-        )
+        row = _hmap_db.fetch_node(*current)
         if row is None or row["parent_db"] is None:
             # 開祖（または未記録ノード）: 親なし。継承権者は current のみ（切替なし）
             card.set_root()
@@ -4382,13 +4396,11 @@ class MainWindow(QMainWindow):
 
         # ── 継承権者: 同じ親を持つ兄弟（#番号昇順 = 継承順位）────
         siblings: list[tuple[str, int]] = []
-        for sib in _hmap_db.fetchall(
-            "SELECT history_db, history_id FROM editor_history_nodes "
-            "WHERE parent_db=? AND parent_id=? ORDER BY history_id ASC",
-            (parent_db, parent_id),
-        ):
-            key = (str(sib["history_db"]), int(sib["history_id"]))
+        for key in sorted(_hmap_db.child_keys(parent_db, parent_id), key=lambda k: k[1]):
             if key == current:
+                siblings.append(key)
+                continue
+            if self._is_draft_history_key(key):
                 siblings.append(key)
                 continue
             # 生成行が実在し、ゴミ箱に入っていない兄弟だけが継承候補
@@ -4424,15 +4436,17 @@ class MainWindow(QMainWindow):
         if history_db_path(current[0]).exists():
             try:
                 cur_row = _history_db.for_history(current[0]).fetchone(
-                    "SELECT thumbnail_data, local_path FROM generations WHERE id=?", (current[1],)
+                    "SELECT thumbnail_data, local_path, invoke_image_name FROM generations WHERE id=?", (current[1],)
                 )
                 thumb = cur_row["thumbnail_data"] if cur_row else None
                 if cur_row:
-                    from pathlib import Path
                     from PySide6.QtGui import QPixmap
-                    local_path = str(cur_row["local_path"] or "")
-                    if local_path and Path(local_path).exists():
-                        pix = QPixmap(local_path)
+                    image_path = resolve_generation_image_path(
+                        cur_row["local_path"],
+                        cur_row["invoke_image_name"],
+                    )
+                    if image_path:
+                        pix = QPixmap(str(image_path))
                         if not pix.isNull():
                             preview_pix = pix
             except Exception:
@@ -4562,10 +4576,7 @@ class MainWindow(QMainWindow):
         rows = None
         if self._history_map_view_root is not None:
             # 「ここ以下のみ表示」: 起点の子孫だけを列挙する
-            if _hmap_db.fetchone(
-                "SELECT 1 FROM editor_history_nodes WHERE history_db=? AND history_id=?",
-                self._history_map_view_root,
-            ):
+            if _hmap_db.fetch_node(*self._history_map_view_root) is not None:
                 rows = _hmap_db.fetch_tree_nodes(*self._history_map_view_root)
             else:
                 self._history_map_view_root = None  # 起点が消えたら全体表示に戻す
@@ -4584,6 +4595,22 @@ class MainWindow(QMainWindow):
             h_id = int(row["history_id"])
             deleted_at = None
             rating = 0
+            node_type = str(row["node_type"] or "generation") if "node_type" in row else "generation"
+            title = str(row["title"] or "") if "title" in row and row["title"] is not None else ""
+            if node_type == "draft" or str(h_db).startswith("draft:"):
+                deleted_at = row["deleted_at"] if "deleted_at" in row else None
+                nodes.append(HistoryMapNode(
+                    history_db=h_db,
+                    history_id=h_id,
+                    parent_db=row["parent_db"],
+                    parent_id=int(row["parent_id"]) if row["parent_id"] is not None else None,
+                    created_at=str(row.get("updated_at") or row["created_at"] or "") if isinstance(row, dict) else str(row["updated_at"] or row["created_at"] or ""),
+                    deleted_at=deleted_at,
+                    rating=0,
+                    node_type="draft",
+                    title=title,
+                ))
+                continue
             db_exists = history_db_path(h_db).exists()
             if db_exists:
                 try:
@@ -4593,7 +4620,7 @@ class MainWindow(QMainWindow):
                         "LEFT JOIN image_reviews r ON r.generation_id = g.id "
                         "WHERE g.id=?", (h_id,)
                     ).fetchone()
-                    deleted_at = gen_row["deleted_at"] if gen_row else None
+                    deleted_at = gen_row["deleted_at"] if gen_row else "missing_generation"
                     rating = int(gen_row["rating"] or 0) if gen_row else 0
                 except Exception:
                     deleted_at = None
@@ -4607,6 +4634,8 @@ class MainWindow(QMainWindow):
                 created_at=str(row["created_at"] or ""),
                 deleted_at=deleted_at,
                 rating=rating,
+                node_type="generation",
+                title=title,
             ))
         return sorted(nodes, key=lambda n: (n.created_at or "", n.history_id), reverse=True)
 
@@ -4682,6 +4711,7 @@ class MainWindow(QMainWindow):
             self._history_map_dialog.bulk_erase_requested.connect(self._bulk_erase_editor_history_nodes)
             self._history_map_dialog.bulk_delete_requested.connect(self._bulk_delete_editor_history_nodes)
             self._history_map_dialog.reparent_requested.connect(self._reparent_editor_history_node)
+            self._history_map_dialog.setup_requested.connect(self._open_invoke_setup)
         already_visible = self._history_map_dialog.isVisible()
         self._refresh_history_map_dialog()
         if hasattr(self._history_map_dialog, "set_raise_on_next_show"):
@@ -4857,14 +4887,13 @@ class MainWindow(QMainWindow):
         """履歴マップの左クリック。
 
         常に現在地を移動する。画像ウィンドウが開いている場合は画像も更新し、
-        閉じている場合は右ペインが開いていれば該当履歴をツリー内で主張表示する。
+        右ペインが開いていれば該当履歴をツリー内で主張表示する。
         """
         viewer_open = self._history_image_viewer_is_open()
         gen_id = int(gen_id)
         self._jump_to_editor_history_node(history_db, gen_id, from_map=True, source=source)
         if viewer_open:
-            self._show_history_map_node_preview(history_db, gen_id)
-            return
+            self._show_history_map_node_preview(history_db, gen_id, set_focus=(source != "central"))
 
         QTimer.singleShot(0, lambda db=history_db, gid=gen_id: self._focus_history_item_from_map_click(db, gid))
 
@@ -4874,6 +4903,15 @@ class MainWindow(QMainWindow):
             active_history = get_active_history_name()
         except Exception:
             active_history = ""
+        if self._is_draft_history_key((history_db, int(gen_id))):
+            owner = self._draft_owner_history_db(history_db)
+            if owner != active_history:
+                return
+            if not getattr(self, "_right_visible", False) or not self._side_panel.isVisible():
+                return
+            if hasattr(self._side_panel, "focus_history_draft"):
+                self._side_panel.focus_history_draft(owner, int(gen_id), animate=True, flash=True)
+            return
         if history_db != active_history:
             return
         if not getattr(self, "_right_visible", False) or not self._side_panel.isVisible():
@@ -4918,28 +4956,12 @@ class MainWindow(QMainWindow):
         import db.hmap_db as _hmap_db
 
         key = (history_db, int(gen_id))
-        row = _hmap_db.fetchone(
-            "SELECT parent_db, parent_id FROM editor_history_nodes "
-            "WHERE history_db=? AND history_id=?",
-            key,
-        )
-        if row is None:
+        if _hmap_db.fetch_node(*key) is None:
             return {"parent": None, "child": None, "prev": None, "next": None}
 
-        parent = None
-        if row["parent_db"] is not None and row["parent_id"] is not None:
-            parent = (str(row["parent_db"]), int(row["parent_id"]))
-
-        children = _hmap_db.fetchall(
-            "SELECT history_db, history_id FROM editor_history_nodes "
-            "WHERE parent_db=? AND parent_id=? "
-            "ORDER BY created_at DESC, history_id DESC",
-            key,
-        )
-        child = (
-            (str(children[0]["history_db"]), int(children[0]["history_id"]))
-            if children else None
-        )
+        parent = _hmap_db.parent_key(*key)
+        children = _hmap_db.child_keys(*key)
+        child = children[0] if children else None
 
         # 兄弟（前後＝◀▶）は「同じ親を持つノード」のみ。開祖(root, parent=None)は
         # 親が無い＝兄弟も無いので prev/next は無し。以前は parent_db IS NULL の
@@ -4947,16 +4969,7 @@ class MainWindow(QMainWindow):
         # 飛べてしまっていた（#101→#80→#283→#1061 等）ため、root では出さない。
         prev_key = next_key = None
         if parent is not None:
-            siblings = _hmap_db.fetchall(
-                "SELECT history_db, history_id FROM editor_history_nodes "
-                "WHERE parent_db=? AND parent_id=? "
-                "ORDER BY created_at DESC, history_id DESC",
-                parent,
-            )
-            sibling_keys = [
-                (str(sib["history_db"]), int(sib["history_id"]))
-                for sib in siblings
-            ]
+            sibling_keys = _hmap_db.sibling_keys(*key)
             try:
                 idx = sibling_keys.index(key)
             except ValueError:
@@ -4968,6 +4981,7 @@ class MainWindow(QMainWindow):
     def _show_history_map_node_preview(
         self, history_db: str, gen_id: int, *, activate_viewer: bool = True,
         set_focus: bool = True,
+        preview_host_override=None,
     ) -> None:
         """
         履歴マップのノードシングルクリック: 大きめプレビューを表示する。
@@ -4977,18 +4991,13 @@ class MainWindow(QMainWindow):
         開いていたビューアの復元。focus/opened は設定から別途復元済みのため、ここで
         ビューアのノードに上書きしてしまうと、別履歴へ切り替えた状態と食い違う）。
 
-        画像の優先順:
-          ① PromptMosaic 保存画像（local_path、100%表示）
-          ② Invoke の元画像（invoke_image_name を API 取得、100%表示）
-          ③ 履歴サムネイル（実寸）
-          ④ どれもない時は 100x100 グレー＋中央に「画像無し」
-        画像ビューア側で拡大縮小するため、ここでは元画像のサイズを保つ。
+        画像ビューアの表示とパス表示は同じ実ファイルパスを使う。
+        パス解決は resolve_generation_image_path() の1系統に限定する。
         """
-        from pathlib import Path
         from PySide6.QtGui import QPixmap, QPainter, QColor
         from db.connections import history_db_path
 
-        preview_host = self._history_map_dialog
+        preview_host = preview_host_override or self._history_map_dialog
         if preview_host is None:
             preview_host = getattr(self._editor, "parent_child_map", None)
         if preview_host is None or not hasattr(preview_host, "show_node_preview"):
@@ -5001,13 +5010,48 @@ class MainWindow(QMainWindow):
             if current is None or not self._update_history_maps_current_node_fast(current):
                 self._refresh_history_map_dialog()
 
+        if self._is_draft_history_key(node_key):
+            import db.hmap_db as _hmap_db
+            owner = self._draft_owner_history_db(history_db)
+            row = _hmap_db.fetch_draft_node(owner, int(gen_id))
+            if row is None:
+                return
+            pix = QPixmap(100, 100)
+            pix.fill(QColor("#5f6670"))
+            painter = QPainter(pix)
+            painter.setPen(QColor("#ffffff"))
+            painter.drawText(
+                pix.rect(), Qt.AlignmentFlag.AlignCenter,
+                tr("history_map.draft_preview"),
+            )
+            painter.end()
+            preview_host.show_node_preview(
+                tr("history_map.draft_preview_title", id=gen_id),
+                pix,
+                node_key=node_key,
+                nav=self._history_map_nav_targets(history_db, gen_id),
+                activate=activate_viewer,
+                image_path=None,
+                image_path_state="missing",
+            )
+            self._apply_image_viewer_background()
+            return
+
         row = None
         if history_db_path(history_db).exists():
             try:
                 row = _history_db.for_history(history_db).fetchone(
-                    "SELECT g.invoke_image_name, g.local_path, g.thumbnail_data, "
+                    "SELECT COALESCE(NULLIF(g.invoke_image_name, ''), NULLIF(gi.invoke_image_name, '')) AS invoke_image_name, "
+                    "COALESCE(NULLIF(g.local_path, ''), NULLIF(gi.local_path, '')) AS local_path, "
+                    "g.thumbnail_data, "
                     "COALESCE(gg.name, '') AS group_name "
                     "FROM generations g "
+                    "LEFT JOIN generation_images gi ON gi.id = ("
+                    "    SELECT id FROM generation_images "
+                    "    WHERE generation_id = g.id "
+                    "      AND (local_path IS NOT NULL OR invoke_image_name IS NOT NULL) "
+                    "    ORDER BY sort_order ASC, id ASC LIMIT 1"
+                    ") "
                     "LEFT JOIN generation_groups gg ON gg.id = g.group_id "
                     "WHERE g.id=?",
                     (gen_id,),
@@ -5016,26 +5060,50 @@ class MainWindow(QMainWindow):
                 row = None
 
         pix: QPixmap | None = None
-        pending_full_image: str | None = None  # 後からバックグラウンド取得する Invoke 画像名
+        displayed_image_path: str | None = None
+        image_path_state = "missing"
+        placeholder_text = tr("history_map.preview_no_image")
         if row:
-            # ① PromptMosaic 保存画像（100%・ローカルなので即時・差し替え不要）
-            local_path = str(row["local_path"] or "")
-            if local_path and Path(local_path).exists():
-                p = QPixmap(local_path)
+            image_subfolder = ""
+            if not row["local_path"] and row["invoke_image_name"]:
+                try:
+                    image_info = self._client.image_info(str(row["invoke_image_name"]))
+                    image_subfolder = str(image_info.get("image_subfolder") or "").strip()
+                except Exception:
+                    image_subfolder = ""
+            image_path = resolve_generation_image_path(
+                row["local_path"],
+                row["invoke_image_name"],
+                image_subfolder=image_subfolder,
+            )
+            if image_path:
+                p = QPixmap(str(image_path))
                 if not p.isNull():
                     pix = p
-            if pix is None:
-                # ③ まず履歴サムネ（実寸）を即時表示して体感を速くする。
-                if row["thumbnail_data"]:
-                    p = QPixmap()
-                    if p.loadFromData(bytes(row["thumbnail_data"])) and not p.isNull():
-                        pix = p
-                # ② Invoke 元画像（100%）は同期取得せず、バックグラウンドで取得して
-                #    後からビューアの画像だけ差し替える（UIスレッドをブロックしない）。
-                if row["invoke_image_name"]:
-                    pending_full_image = str(row["invoke_image_name"])
+                    displayed_image_path = str(image_path)
+                    image_path_state = "exists"
+                    if not row["local_path"]:
+                        try:
+                            hdb = _history_db.for_history(history_db)
+                            hdb.execute(
+                                "UPDATE generations SET local_path=? WHERE id=? "
+                                "AND (local_path IS NULL OR local_path='')",
+                                (displayed_image_path, gen_id),
+                            )
+                            if row["invoke_image_name"]:
+                                hdb.execute(
+                                    "UPDATE generation_images SET local_path=? "
+                                    "WHERE generation_id=? AND invoke_image_name=? "
+                                    "AND (local_path IS NULL OR local_path='')",
+                                    (displayed_image_path, gen_id, row["invoke_image_name"]),
+                                )
+                        except Exception:
+                            pass
+            elif row["invoke_image_name"] and not invoke_image_roots():
+                image_path_state = "outputs_dir_required"
+                placeholder_text = tr("history_map.preview_outputs_dir_required")
 
-        # ④ 画像無し
+        # 実ファイルが無い状態では画像自体を表示しない。パス欄も「無し」状態にする。
         if pix is None:
             pix = QPixmap(100, 100)
             pix.fill(QColor("#808080"))
@@ -5043,7 +5111,7 @@ class MainWindow(QMainWindow):
             painter.setPen(QColor("#ffffff"))
             painter.drawText(
                 pix.rect(), Qt.AlignmentFlag.AlignCenter,
-                tr("history_map.preview_no_image"),
+                placeholder_text,
             )
             painter.end()
 
@@ -5059,34 +5127,11 @@ class MainWindow(QMainWindow):
             node_key=node_key,
             nav=self._history_map_nav_targets(history_db, gen_id),
             activate=activate_viewer,
+            image_path=displayed_image_path,
+            image_path_state=image_path_state,
         )
         # 画像ウィンドウの背景色を、このノードの履歴背景色（マップと共有）に合わせる。
         self._apply_image_viewer_background()
-        if pending_full_image:
-            self._start_node_full_image_fetch(node_key, pending_full_image, preview_host)
-
-    def _start_node_full_image_fetch(self, node_key, image_name: str, preview_host) -> None:
-        """フル画像をバックグラウンド取得し、ビューアが同じノードを表示中なら差し替える。"""
-        workers = self.__dict__.setdefault("_node_image_workers", [])
-        worker = _NodeFullImageWorker(self._client, node_key, image_name, self)
-
-        def _on_loaded(nk, data, host=preview_host) -> None:
-            from PySide6.QtGui import QPixmap
-            p = QPixmap()
-            if not p.loadFromData(bytes(data)) or p.isNull():
-                return
-            if hasattr(host, "update_node_image"):
-                host.update_node_image(nk, p)
-
-        def _cleanup(w=worker) -> None:
-            if w in workers:
-                workers.remove(w)
-            w.deleteLater()
-
-        worker.loaded.connect(_on_loaded)
-        worker.finished.connect(_cleanup)
-        workers.append(worker)
-        worker.start()
 
     def _jump_to_editor_history_node(
         self, history_db: str, gen_id: int, *, from_map: bool = False, source: str = "",
@@ -5094,6 +5139,10 @@ class MainWindow(QMainWindow):
         # source: 操作元のマップ。"central"=中央ペイン / "enlarged"=拡大ダイアログ。
         # 操作したマップ自身はスクロールさせず（ユーザーが見ている）、反対側のマップを
         # 現在地へ滑らかにスクロール追従させる。それ以外（系譜カード等）は両方追従。
+        if self._is_draft_history_key((history_db, int(gen_id))):
+            self._jump_to_editor_history_draft(history_db, int(gen_id), from_map=from_map, source=source)
+            return
+
         from db.connections import get_history_conn, history_db_path
         db_path = history_db_path(history_db)
         if not db_path.exists():
@@ -5145,12 +5194,46 @@ class MainWindow(QMainWindow):
                 # すべての同期再構築が終わった次のイベントループで生成・再生する。
                 new_key = (history_db, gen_id)
                 old_key = old_current
-                QTimer.singleShot(
-                    0, lambda o=old_key, n=new_key: self._play_map_move_animation(o, n)
-                )
+                QTimer.singleShot(0, lambda o=old_key, n=new_key: self._play_map_move_animation(o, n))
+
+    def _jump_to_editor_history_draft(
+        self, history_db: str, draft_id: int, *, from_map: bool = False, source: str = "",
+    ) -> None:
+        import db.hmap_db as _hmap_db
+        owner = self._draft_owner_history_db(history_db)
+        row = _hmap_db.fetch_draft_node(owner, int(draft_id))
+        if row is None:
+            self._show_status(tr("history_map.target_removed"), error=True)
+            self._open_history_map()
+            return
+        old_current = self._current_editor_history_node()
+        try:
+            doc = PromptDocument.from_json(str(row["prompt_json"] or ""))
+        except Exception:
+            self._show_status(tr("history_map.draft_load_fail"), error=True)
+            return
+        self._editor.set_document(doc)
+        self._editor.set_memo(str(row["memo_text"] or ""))
+        self._editor_dirty = False
+        self._set_current_editor_history_node(history_db, int(draft_id), refresh_lineage=not from_map)
+        self._history_map_dialog_focus = (history_db, int(draft_id))
+        if from_map:
+            if not self._update_history_maps_current_node_fast((history_db, int(draft_id))):
+                self._refresh_history_map_dialog()
+        else:
+            self._refresh_history_map_dialog()
+        self._follow_current_in_maps(source)
+        if from_map:
+            new_key = (history_db, int(draft_id))
+            QTimer.singleShot(0, lambda o=old_current, n=new_key: self._play_map_move_animation(o, n))
+        self._show_status(tr("history_map.draft_loaded", id=draft_id))
 
     def _play_map_move_animation(self, old_key, new_key) -> None:
-        """中央/拡大マップで、旧→新ノードへ青枠が滑る移動アニメを再生する。"""
+        """中央/拡大マップで、旧→新ノードへ青枠が滑る移動アニメを再生する。
+
+        現在地へのスクロール追従は _follow_current_in_maps() 側で操作元を除外するが、
+        移動アニメはクリック元のマップにも出す。
+        """
         if self._history_map_dialog is not None:
             self._history_map_dialog.play_move_animation(old_key, new_key)
         panel = getattr(self._editor, "parent_child_map", None)
@@ -5404,55 +5487,83 @@ class MainWindow(QMainWindow):
         seen: set[tuple[str, int]] = set()
         while current not in seen:
             seen.add(current)
-            row = _hmap_db.fetchone(
-                "SELECT parent_db, parent_id FROM editor_history_nodes "
-                "WHERE history_db=? AND history_id=?",
-                current,
-            )
-            if row is None or row["parent_db"] is None:
+            parent = _hmap_db.parent_key(current[0], current[1])
+            if parent is None:
                 return False
-            parent = (str(row["parent_db"]), int(row["parent_id"]))
             if parent == ancestor:
                 return True
             current = parent
         return False
 
+    def _history_map_subtree_count(self, root: tuple[str, int]) -> int:
+        import db.hmap_db as _hmap_db
+        return len(_hmap_db.fetch_tree_nodes(root[0], root[1]))
+
+    def _history_map_node_label(self, key: tuple[str, int]) -> str:
+        if self._is_draft_history_key(key):
+            return tr("history_map.draft_node_label", n=key[1])
+        return tr("history_map.node_label", n=key[1])
+
     def _reparent_editor_history_node(
         self, child_db: str, child_id: int, parent_db: str, parent_id: int
     ) -> None:
-        """直系内のみ、子孫ノードの親を祖先ノードへ付け替える。"""
+        """履歴マップD&D: child以下のサブツリーをparentの子として移動する。"""
         child = (str(child_db), int(child_id))
         parent = (str(parent_db), int(parent_id))
         if child == parent:
             return
         import db.hmap_db as _hmap_db
-        row = _hmap_db.fetchone(
-            "SELECT parent_db, parent_id FROM editor_history_nodes "
-            "WHERE history_db=? AND history_id=?",
-            child,
-        )
-        if row is None or row["parent_db"] is None:
+        child_row = _hmap_db.fetch_node(child[0], child[1])
+        parent_row = _hmap_db.fetch_node(parent[0], parent[1])
+        if child_row is None or parent_row is None:
             return
-        current_parent = (str(row["parent_db"]), int(row["parent_id"]))
+        current_parent = _hmap_db.parent_key(child[0], child[1])
         if current_parent == parent:
             return
-        if not self._is_history_map_ancestor(parent, child):
+        if self._is_history_map_ancestor(child, parent):
             self._show_status(tr("history_map.reparent_invalid_status"), error=True)
             return
-        _hmap_db.execute(
-            "UPDATE editor_history_nodes SET parent_db=?, parent_id=? "
-            "WHERE history_db=? AND history_id=?",
-            (parent[0], parent[1], child[0], child[1]),
+        subtree_count = self._history_map_subtree_count(child)
+        reply = QMessageBox.question(
+            self,
+            tr("history_map.reparent_confirm_title"),
+            tr(
+                "history_map.reparent_confirm_msg",
+                child=self._history_map_node_label(child),
+                parent=self._history_map_node_label(parent),
+                n=subtree_count,
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        if _hmap_db.is_draft_key(child):
+            owner = _hmap_db.owner_history_db_from_draft(child[0])
+            _hmap_db.execute(
+                "UPDATE editor_history_draft_nodes SET parent_db=?, parent_id=?, "
+                "updated_at=CURRENT_TIMESTAMP WHERE owner_history_db=? AND id=?",
+                (parent[0], parent[1], owner, child[1]),
+            )
+        else:
+            _hmap_db.execute(
+                "UPDATE editor_history_nodes SET parent_db=?, parent_id=? "
+                "WHERE history_db=? AND history_id=?",
+                (parent[0], parent[1], child[0], child[1]),
+            )
         self._history_map_dialog_focus = child
         self._refresh_lineage_card()
         self._refresh_history_map_dialog()
+        self._side_panel.refresh_history()
         self._show_status(tr("history_map.reparented_status"))
 
     def _delete_editor_history_single(self, history_db: str, gen_id: int) -> None:
         """削除: 子を親へ直系接続して本人のノードを除去し、履歴行をゴミ箱へ（警告あり）。"""
         import db.hmap_db as _hmap_db
         from db.connections import get_active_history_name, history_db_path
+        if self._is_draft_history_key((history_db, int(gen_id))):
+            self._delete_editor_history_draft_single(history_db, int(gen_id))
+            return
         node = _hmap_db.fetchone(
             "SELECT parent_db, parent_id FROM editor_history_nodes "
             "WHERE history_db=? AND history_id=?",
@@ -5493,105 +5604,41 @@ class MainWindow(QMainWindow):
             self._side_panel.refresh_history()
         self._show_status(tr("history_map.deleted_single_status"))
 
-    def _active_history_row_for_adoption(self, history_db: str, gen_id: int) -> dict | None:
-        item = self._lineage_row_item(history_db, gen_id)
-        if item is not None:
-            return item
-        try:
-            row = _history_db.for_history(history_db).fetchone(
-                "SELECT thumbnail_data, deleted_at FROM generations WHERE id=?",
-                (gen_id,),
-            )
-        except Exception:
-            return None
-        if row is None or row["deleted_at"] is not None:
-            return None
-        return {
-            "history_db": history_db,
-            "history_id": int(gen_id),
-            "thumbnail_data": row["thumbnail_data"],
-            "preview_pixmap": None,
-        }
-
-    def _open_adopt_history_dialog(self, gen_id: int) -> None:
-        """右ペイン履歴から、対象履歴を別の履歴マップ親へ単独接続する。"""
-        from db.connections import get_active_history_name
-        history_db = get_active_history_name()
-        adoptee = self._active_history_row_for_adoption(history_db, int(gen_id))
-        if adoptee is None:
-            self._show_status(tr("history_map.target_removed"), error=True)
-            return
-        rows = _history_db.fetchall(
-            "SELECT id, thumbnail_data FROM generations "
-            "WHERE deleted_at IS NULL ORDER BY id DESC"
-        )
-        candidates: list[dict] = []
-        for row in rows:
-            item = self._active_history_row_for_adoption(history_db, int(row["id"]))
-            if item is not None:
-                candidates.append(item)
-        dlg = _AdoptHistoryDialog(adoptee, candidates, self)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-        parent = dlg.selected_parent()
-        if parent is None:
-            return
-        self._adopt_history_node((history_db, int(gen_id)), parent)
-
-    def _adopt_history_node(self, child: tuple[str, int], parent: tuple[str, int]) -> None:
-        """単独養子: child だけを parent の子にし、元の子孫は元親へつなぎ直す。"""
-        if child == parent:
-            return
+    def _delete_editor_history_draft_single(self, history_db: str, draft_id: int) -> None:
+        """子なしドラフトだけを論理削除する。子ありは系譜保全のため初期実装では不可。"""
         import db.hmap_db as _hmap_db
-        parent_exists = _hmap_db.fetchone(
-            "SELECT 1 FROM editor_history_nodes WHERE history_db=? AND history_id=?",
-            parent,
+        owner = self._draft_owner_history_db(history_db)
+        row = _hmap_db.fetch_draft_node(owner, int(draft_id))
+        if row is None:
+            return
+        key = (history_db, int(draft_id))
+        if _hmap_db.child_keys(*key):
+            self._show_status(tr("history_map.draft_delete_has_children"), error=True)
+            return
+        reply = QMessageBox.question(
+            self,
+            tr("history_map.draft_delete_confirm_title"),
+            tr("history_map.draft_delete_confirm_msg"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
-        with _hmap_db.transaction() as conn:
-            if parent_exists is None:
-                conn.execute(
-                    "INSERT OR REPLACE INTO editor_history_nodes "
-                    "(history_db, history_id, parent_db, parent_id, created_at) "
-                    "VALUES (?, ?, NULL, NULL, CURRENT_TIMESTAMP)",
-                    parent,
-                )
-            old = conn.execute(
-                "SELECT parent_db, parent_id FROM editor_history_nodes "
-                "WHERE history_db=? AND history_id=?",
-                child,
-            ).fetchone()
-            old_parent = None
-            if old is not None and old["parent_db"] is not None:
-                old_parent = (str(old["parent_db"]), int(old["parent_id"]))
-            if old is not None:
-                if old_parent is None:
-                    conn.execute(
-                        "UPDATE editor_history_nodes SET parent_db=NULL, parent_id=NULL "
-                        "WHERE parent_db=? AND parent_id=?",
-                        child,
-                    )
-                else:
-                    conn.execute(
-                        "UPDATE editor_history_nodes SET parent_db=?, parent_id=? "
-                        "WHERE parent_db=? AND parent_id=?",
-                        (old_parent[0], old_parent[1], child[0], child[1]),
-                    )
-                conn.execute(
-                    "DELETE FROM editor_history_nodes WHERE history_db=? AND history_id=?",
-                    child,
-                )
-            conn.execute(
-                "INSERT OR REPLACE INTO editor_history_nodes "
-                "(history_db, history_id, parent_db, parent_id, created_at) "
-                "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
-                (child[0], child[1], parent[0], parent[1]),
-            )
-        self._history_map_dialog_focus = child
-        self._history_map_opened_node = child
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        parent_key = (str(row["parent_db"]), int(row["parent_id"]))
+        _hmap_db.soft_delete_draft(owner, int(draft_id))
+        if self._current_editor_history_node() == key:
+            self._set_current_editor_history_node(parent_key[0], parent_key[1])
+        self._clear_history_map_opened_node_if_removed(key)
+        if self._history_map_view_root == key:
+            self._history_map_view_root = None
+        if self._history_map_dialog_focus == key:
+            self._history_map_dialog_focus = parent_key
+        if getattr(self, "_editor_history_session_draft", None) == key:
+            self._editor_history_session_draft = None
         self._refresh_lineage_card()
         self._refresh_history_map_dialog()
         self._side_panel.refresh_history()
-        self._show_status(tr("adopt_history.done", child=child[1], parent=parent[1]))
+        self._show_status(tr("history_map.draft_deleted_status"))
 
     def _load_generation_for_history_jump(self, generation_id: int, history_db_name: str | None = None) -> bool:
         """履歴マップ用。ロック状態に関係なく生成時点の中央ペイン状態を復元する。"""
@@ -5880,12 +5927,8 @@ class MainWindow(QMainWindow):
 
         invoke_meta = isinstance(meta, dict) and meta.get("source_format") == "invokeai"
         if invoke_meta:
-            registered_pos, pending_pos = self._split_registered_prompt_tiles(
-                positive, parser=parse_invoke_prompt
-            )
-            registered_neg, pending_neg = self._split_registered_prompt_tiles(
-                negative, parser=parse_invoke_prompt
-            )
+            registered_pos, pending_pos = self._split_invoke_prompt_tiles(positive)
+            registered_neg, pending_neg = self._split_invoke_prompt_tiles(negative)
         else:
             registered_pos, pending_pos = self._split_registered_prompt_tiles(positive)
             registered_neg, pending_neg = self._split_registered_prompt_tiles(negative)
@@ -6060,6 +6103,14 @@ class MainWindow(QMainWindow):
                 registered.append(processed)
             pending.extend(item_pending)
         return registered, pending
+
+    def _split_invoke_prompt_tiles(self, prompt: str) -> tuple[list, list]:
+        text = (prompt or "").strip()
+        if not text:
+            return [], []
+        if looks_like_dynamic_prompt(text):
+            return [NaturalTextTile(text=text, source_text=text, translated_text="")], []
+        return self._split_registered_prompt_tiles(text, parser=parse_invoke_prompt)
 
     def _apply_invoke_meta_settings(
         self,
@@ -7001,6 +7052,7 @@ class MainWindow(QMainWindow):
         self._sched_combo.setToolTip(tr("main.scheduler_tooltip"))
         self._board_label.setText(tr("main.board_label"))
         self._board_combo.setToolTip(tr("main.board_tooltip"))
+        self._retranslate_board_combo()
         self._btn_board_reload.setToolTip(tr("main.board_reload_tooltip"))
         self._apply_model_mode_ui()
         self._update_left_pane_texts()
@@ -7046,6 +7098,29 @@ class MainWindow(QMainWindow):
         self._group_preset_browser.retranslate_and_restyle()
         self._prompt_text_browser.retranslate_and_restyle()
         self._prompt_text_browser.setStyleSheet(self._prompt_text_browser.styleSheet())
+        if self._history_map_dialog is not None and hasattr(self._history_map_dialog, "retranslate_and_restyle"):
+            self._history_map_dialog.retranslate_and_restyle()
+        self._refresh_visible_history_image_viewers_for_language()
+
+    def _refresh_visible_history_image_viewers_for_language(self) -> None:
+        hosts = (
+            self._history_map_dialog,
+            getattr(self._editor, "parent_child_map", None),
+        )
+        for host in hosts:
+            if host is None or not hasattr(host, "image_viewer_state"):
+                continue
+            visible, node_key = host.image_viewer_state()
+            if not visible or node_key is None:
+                continue
+            history_db, gen_id = node_key
+            self._show_history_map_node_preview(
+                history_db,
+                int(gen_id),
+                activate_viewer=False,
+                set_focus=False,
+                preview_host_override=host,
+            )
 
     def _apply_nsfw_setting(self) -> None:
         """NSFW表示設定を、該当する一覧だけへ即時反映する。"""

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from PySide6.QtCore import (
     QByteArray, QEasingCurve, QElapsedTimer, QEvent, QPoint, QPointF, QRect, QRectF, Qt, Signal,
@@ -22,6 +24,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QRubberBand,
     QToolButton,
@@ -33,6 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.i18n import tr
+from core.image_resolver import resolve_generation_image_path
 from ui.styles import (
     ACCENT, EMOJI_ICON_SS, RED, SURFACE0, SURFACE1, SURFACE2, TEXT, SUBTEXT,
     themed_button_style, ui_font,
@@ -42,7 +46,7 @@ ZOOM_MIN = 0.2
 ZOOM_MAX = 2.0
 ZOOM_STEP = 1.2  # Ctrl+ホイール1ノッチあたりの倍率
 
-NodeKey = tuple[str, int]  # (history_db_name, history_id)
+NodeKey = tuple[str, int]  # (history_db_name or draft:<history_db_name>, history_id/draft_id)
 
 
 def _read_app_setting(key: str, default: str = "") -> str:
@@ -127,6 +131,8 @@ class HistoryMapNode:
     created_at: str
     deleted_at: str | None
     rating: int = 0  # image_reviews.rating（0=未評価）
+    node_type: str = "generation"  # "generation" | "draft"
+    title: str = ""
 
     @property
     def gen_id(self) -> int:
@@ -145,6 +151,10 @@ class HistoryMapNode:
         if self.parent_db is None:
             return None
         return (self.parent_db, self.parent_id)  # type: ignore[return-value]
+
+    @property
+    def is_draft(self) -> bool:
+        return self.node_type == "draft" or self.history_db.startswith("draft:")
 
 
 NODE_W = 82
@@ -235,8 +245,10 @@ class _NodeItem(QGraphicsRectItem):
         thumb_frame.setPos(9, 8)
         thumb_frame.setPen(QPen(QColor(SURFACE1), 1))
         thumb_frame.setBrush(QBrush(QColor(SURFACE0)))
-        pix = self._load_thumbnail(node.history_db, node.history_id)
-        if pix is not None and not pix.isNull():
+        pix = None if node.is_draft else self._load_thumbnail(node.history_db, node.history_id)
+        if node.is_draft:
+            self._draw_draft_placeholder(thumb_frame)
+        elif pix is not None and not pix.isNull():
             pix_item = QGraphicsPixmapItem(
                 pix.scaled(
                     64,
@@ -252,7 +264,8 @@ class _NodeItem(QGraphicsRectItem):
                 8 + max(0, (64 - pix_item.pixmap().height()) / 2),
             )
 
-        self._label = QGraphicsSimpleTextItem(tr("history_map.node_label", n=node.history_id), self)
+        label_text = tr("history_map.draft_node_label", n=node.history_id) if node.is_draft else tr("history_map.node_label", n=node.history_id)
+        self._label = QGraphicsSimpleTextItem(label_text, self)
         self._label.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         label_rect = self._label.boundingRect()
         self._label.setPos(
@@ -261,8 +274,9 @@ class _NodeItem(QGraphicsRectItem):
         )
 
         # ★評価（未評価は薄い☆5つで揃える）
-        rating = max(0, min(5, int(node.rating or 0)))
-        self._stars = QGraphicsSimpleTextItem("★" * rating + "☆" * (5 - rating), self)
+        rating = 0 if node.is_draft else max(0, min(5, int(node.rating or 0)))
+        stars_text = tr("history_map.draft_badge") if node.is_draft else "★" * rating + "☆" * (5 - rating)
+        self._stars = QGraphicsSimpleTextItem(stars_text, self)
         self._stars.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         star_font = self._stars.font()
         star_font.setPointSize(max(7, star_font.pointSize() - 2))
@@ -278,6 +292,20 @@ class _NodeItem(QGraphicsRectItem):
 
         self._apply_visual(False)
 
+    def _draw_draft_placeholder(self, parent: QGraphicsItem) -> None:
+        paper = QGraphicsRectItem(QRectF(18, 14, 28, 36), parent)
+        paper.setPen(QPen(QColor(SUBTEXT), 1))
+        paper.setBrush(QBrush(QColor(SURFACE1)))
+        label = QGraphicsSimpleTextItem(tr("history_map.draft_icon"), parent)
+        label.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        label.setBrush(QBrush(QColor(ACCENT)))
+        font = label.font()
+        font.setPointSize(max(10, font.pointSize() + 3))
+        font.setBold(True)
+        label.setFont(font)
+        rect = label.boundingRect()
+        label.setPos(32 - rect.width() / 2, 32 - rect.height() / 2)
+
     @staticmethod
     def _load_thumbnail(history_db: str, history_id: int) -> QPixmap | None:
         from db.connections import get_history_conn, history_db_path
@@ -287,7 +315,7 @@ class _NodeItem(QGraphicsRectItem):
         try:
             conn = get_history_conn(history_db)
             row = conn.execute(
-                "SELECT thumbnail_data, local_path FROM generations WHERE id=?",
+                "SELECT thumbnail_data, local_path, invoke_image_name FROM generations WHERE id=?",
                 (history_id,),
             ).fetchone()
         except Exception:
@@ -296,9 +324,12 @@ class _NodeItem(QGraphicsRectItem):
             pix = QPixmap()
             if pix.loadFromData(bytes(row["thumbnail_data"])) and not pix.isNull():
                 return pix
-        local_path = str(row["local_path"] or "") if row else ""
-        if local_path:
-            pix = QPixmap(local_path)
+        image_path = resolve_generation_image_path(
+            row["local_path"] if row else "",
+            row["invoke_image_name"] if row else "",
+        )
+        if image_path:
+            pix = QPixmap(str(image_path))
             if not pix.isNull():
                 return pix
         return None
@@ -558,7 +589,11 @@ class _HistoryMapView(QGraphicsView):
             self._hover_badge.hide()
 
     def _hover_badge_text(self, item: _NodeItem) -> str:
-        label = tr("history_map.node_label", n=item.node.history_id)
+        label = (
+            tr("history_map.draft_node_label", n=item.node.history_id)
+            if item.node.is_draft
+            else tr("history_map.node_label", n=item.node.history_id)
+        )
         if getattr(item, "_is_current", False):
             return f"{tr('history_map.current_node')} {label}"
         return label
@@ -809,6 +844,7 @@ class _HistoryMapView(QGraphicsView):
         self.viewport().unsetCursor()
         self._clear_drag_visuals()
         if not dragging:
+            self.node_clicked.emit(item.node.history_db, item.node.history_id)
             return
         target = self._node_item_at(pos)
         if target is not None and target is not item:
@@ -930,7 +966,7 @@ class _HistoryMapView(QGraphicsView):
                     self.node_mouse_press(
                         item,
                         pos,
-                        drag_enabled=bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier),
+                        drag_enabled=True,
                     )
                     return True
                 self._begin_pan(event, Qt.MouseButton.LeftButton)
@@ -1147,7 +1183,7 @@ class _HistoryMapView(QGraphicsView):
             act_bulk_erase = menu.addAction(tr("history_map.menu_bulk_erase", n=len(selected_keys)))
             act_bulk_delete = menu.addAction(tr("history_map.menu_bulk_delete", n=len(selected_keys)))
             menu.addSeparator()
-        if not item.is_root:
+        if not item.is_root and not node.is_draft:
             menu.addSeparator()
             if not deleted:
                 act_detach = menu.addAction(tr("history_map.detach_subtree"))
@@ -1157,6 +1193,19 @@ class _HistoryMapView(QGraphicsView):
             if not deleted:
                 # 削除=消去＋ゴミ箱行き（警告あり）。ゴミ箱済み行には出さない
                 act_delete = menu.addAction(tr("history_map.menu_delete"))
+        elif node.is_draft and not deleted:
+            menu.addSeparator()
+            has_children = False
+            try:
+                import db.hmap_db as _hmap_db
+                has_children = bool(_hmap_db.child_keys(node.history_db, node.history_id))
+            except Exception:
+                has_children = True
+            act_delete = menu.addAction(
+                tr("history_map.menu_delete_draft_blocked")
+                if has_children else tr("history_map.menu_delete")
+            )
+            act_delete.setEnabled(not has_children)
 
         chosen = menu.exec(event.globalPos())
         args = (node.history_db, node.history_id)
@@ -1220,14 +1269,22 @@ class _ImagePreviewView(QGraphicsView):
             self.setBackgroundBrush(QBrush(c))
 
     def set_pixmap(self, pix: QPixmap) -> None:
-        self._pix_item.setPixmap(pix)
-        self._scene.setSceneRect(QRectF(pix.rect()))
-        if self._zoom_mode == "fit":
-            QTimer.singleShot(0, self.fit_image)
-        elif self._zoom_mode == "original":
-            self.original_size()
-        else:
-            self._apply_zoom(self._zoom)
+        self.viewport().setUpdatesEnabled(False)
+        try:
+            self._pix_item.setPixmap(pix)
+            self._scene.setSceneRect(QRectF(pix.rect()))
+            if self._zoom_mode == "fit":
+                if self.isVisible() and self.viewport().width() > 1 and self.viewport().height() > 1:
+                    self.fit_image()
+                else:
+                    QTimer.singleShot(0, self.fit_image)
+            elif self._zoom_mode == "original":
+                self.original_size()
+            else:
+                self._apply_zoom(self._zoom)
+        finally:
+            self.viewport().setUpdatesEnabled(True)
+            self.viewport().update()
 
     def fit_image(self) -> None:
         pix = self._pix_item.pixmap()
@@ -1299,6 +1356,7 @@ class _ImagePreviewView(QGraphicsView):
 class _HistoryImageViewerDialog(QDialog):
     jump_requested = Signal(str, int)
     node_requested = Signal(str, int)
+    setup_requested = Signal()
 
     _GEOMETRY_KEY = "history_image_viewer_geometry"
 
@@ -1309,6 +1367,8 @@ class _HistoryImageViewerDialog(QDialog):
         self.resize(720, 560)
         self._node_key: NodeKey | None = None
         self._nav: dict[str, NodeKey | None] = {}
+        self._image_path: str = ""
+        self._image_path_state: str = "missing"
         self._restored = _restore_saved_geometry(self, self._GEOMETRY_KEY)
         self._raise_on_next_show = True
         # 初回表示の白いちらつき防止（showEvent でフェードイン）
@@ -1352,6 +1412,25 @@ class _HistoryImageViewerDialog(QDialog):
         self._zoom_label.setStyleSheet(f"color: {SUBTEXT};")
         root.addWidget(self._zoom_label)
 
+        path_row = QHBoxLayout()
+        path_row.setContentsMargins(0, 0, 0, 0)
+        path_row.setSpacing(6)
+        self._path_label = QLabel(tr("history_map.preview_path_label"), self)
+        self._path_label.setStyleSheet(f"color: {SUBTEXT};")
+        path_row.addWidget(self._path_label)
+        self._path_edit = QLineEdit(self)
+        self._path_edit.setReadOnly(True)
+        self._path_edit.setStyleSheet(
+            f"QLineEdit {{ background: {SURFACE1}; color: {TEXT}; "
+            f"border: 1px solid {SURFACE2}; border-radius: 3px; padding: 3px; }}"
+        )
+        path_row.addWidget(self._path_edit, stretch=1)
+        self._open_folder_btn = QPushButton(tr("history_map.preview_open_folder_btn"))
+        self._open_folder_btn.setStyleSheet(btn_style)
+        self._open_folder_btn.clicked.connect(self._on_path_button_clicked)
+        path_row.addWidget(self._open_folder_btn)
+        root.addLayout(path_row)
+
         nav_grid = QGridLayout()
         nav_grid.setContentsMargins(0, 0, 0, 0)
         nav_grid.setHorizontalSpacing(4)
@@ -1389,11 +1468,16 @@ class _HistoryImageViewerDialog(QDialog):
         pix: QPixmap,
         node_key: NodeKey,
         nav: dict[str, NodeKey | None],
+        image_path: str | None = None,
+        image_path_state: str = "missing",
     ) -> None:
         self._node_key = node_key
         self._nav = nav
+        self._image_path = image_path or ""
+        self._image_path_state = image_path_state if image_path_state in ("exists", "outputs_dir_required") else "missing"
         self._title.setText(header)
         self.setWindowTitle(header)
+        self._update_path_row()
         self._view.set_pixmap(pix)
         self._apply_nav_state()
 
@@ -1401,23 +1485,64 @@ class _HistoryImageViewerDialog(QDialog):
         """画像エリアの背景色を履歴（マップ）の背景色に合わせる。"""
         self._view.set_background_color(color)
 
-    def update_image(self, node_key: NodeKey, pix: QPixmap) -> None:
+    def update_image(
+        self,
+        node_key: NodeKey,
+        pix: QPixmap,
+        image_path: str | None = None,
+        image_path_state: str = "missing",
+    ) -> None:
         """表示中のノードが一致する場合だけ画像を差し替える（非同期フル画像用）。
 
         ノードを切り替えた後に古いリクエストが返ってきても、現在のノードと一致
         しなければ無視するので誤差し替えしない。
         """
         if self._node_key == node_key and pix is not None and not pix.isNull():
+            self._image_path = image_path or ""
+            self._image_path_state = image_path_state if image_path_state in ("exists", "outputs_dir_required") else "missing"
+            self._update_path_row()
             self._view.set_pixmap(pix)
 
     def clear_image(self) -> None:
         self._node_key = None
         self._nav = {}
+        self._image_path = ""
+        self._image_path_state = "missing"
         self._title.setText(tr("history_map.preview_blank"))
         self.setWindowTitle(tr("history_map.preview_blank"))
+        self._update_path_row()
         self._view.set_pixmap(QPixmap())
         self._apply_nav_state()
         self._apply_btn.setEnabled(False)
+
+    def _update_path_row(self) -> None:
+        if self._image_path_state == "exists" and self._image_path:
+            self._path_edit.setText(self._image_path)
+            self._open_folder_btn.setText(tr("history_map.preview_open_folder_btn"))
+        elif self._image_path_state == "outputs_dir_required":
+            self._path_edit.setText(tr("history_map.preview_outputs_dir_required"))
+            self._open_folder_btn.setText(tr("history_map.preview_set_invoke_path_btn"))
+        else:
+            self._path_edit.setText(tr("history_map.preview_path_missing"))
+            self._open_folder_btn.setText(tr("history_map.preview_open_folder_btn"))
+        path = Path(self._image_path) if self._image_path_state == "exists" and self._image_path else None
+        self._open_folder_btn.setEnabled(
+            self._image_path_state == "outputs_dir_required"
+            or bool(path and path.exists() and path.parent.exists())
+        )
+
+    def _on_path_button_clicked(self) -> None:
+        if self._image_path_state == "outputs_dir_required":
+            self.setup_requested.emit()
+            return
+        self._open_image_folder()
+
+    def _open_image_folder(self) -> None:
+        if not self._image_path:
+            return
+        path = Path(self._image_path)
+        if path.exists() and path.parent.exists():
+            os.startfile(str(path.parent))
 
     def _apply_nav_state(self) -> None:
         for direction, btn in self._nav_buttons.items():
@@ -1441,6 +1566,21 @@ class _HistoryImageViewerDialog(QDialog):
             "manual": "history_map.preview_zoom_manual",
         }.get(mode, "history_map.preview_zoom_manual")
         self._zoom_label.setText(f"{tr(key)} {round(zoom * 100)}%")
+
+    def retranslate_and_restyle(self) -> None:
+        self._apply_btn.setText(tr("history_map.preview_apply_btn"))
+        self._fit_btn.setText(tr("history_map.preview_fit_btn"))
+        self._actual_btn.setText(tr("history_map.preview_actual_btn"))
+        self._close_btn.setText(tr("history_map.preview_close_btn"))
+        self._path_label.setText(tr("history_map.preview_path_label"))
+        if self._node_key is None:
+            self._title.setText(tr("history_map.preview_blank"))
+            self.setWindowTitle(tr("history_map.preview_blank"))
+        self._update_path_row()
+        self._update_zoom_label(
+            float(getattr(self._view, "_zoom", 1.0)),
+            str(getattr(self._view, "_zoom_mode", "manual")),
+        )
 
     def set_raise_on_next_show(self, enabled: bool) -> None:
         self._raise_on_next_show = bool(enabled)
@@ -1494,6 +1634,7 @@ class HistoryMapDialog(QDialog):
     bulk_erase_requested = Signal(list)
     bulk_delete_requested = Signal(list)
     reparent_requested = Signal(str, int, str, int)
+    setup_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1605,6 +1746,16 @@ class HistoryMapDialog(QDialog):
         root.setContentsMargins(8, 8, 8, 8)
         root.addLayout(zoom_bar)
         root.addWidget(self._view)
+
+    def retranslate_and_restyle(self) -> None:
+        self.setWindowTitle(tr("history_map.title"))
+        self._goto_current_btn.setToolTip(tr("history_map.goto_current_tooltip"))
+        self._zoom_fit_btn.setToolTip(tr("history_map.zoom_fit_tooltip"))
+        self._zoom_out_btn.setToolTip(tr("history_map.zoom_out_tooltip"))
+        self._zoom_in_btn.setToolTip(tr("history_map.zoom_in_tooltip"))
+        self._zoom_reset_btn.setToolTip(tr("history_map.zoom_reset_tooltip"))
+        if self._image_viewer is not None and hasattr(self._image_viewer, "retranslate_and_restyle"):
+            self._image_viewer.retranslate_and_restyle()
 
     def reset_zoom(self) -> None:
         """倍率を100%に戻す（マップを開き直したときの初期化用）。"""
@@ -1921,13 +2072,18 @@ class HistoryMapDialog(QDialog):
         node_key: NodeKey,
         nav: dict[str, NodeKey | None] | None = None,
         activate: bool = True,
+        image_path: str | None = None,
+        image_path_state: str = "missing",
     ) -> None:
         """閉じない画像ビューアを表示し、履歴マップの選択と連動させる。"""
         if self._image_viewer is None:
             self._image_viewer = _HistoryImageViewerDialog(self)
             self._image_viewer.jump_requested.connect(self.jump_requested.emit)
             self._image_viewer.node_requested.connect(self.preview_requested.emit)
-        self._image_viewer.set_node(header, pix, node_key, nav or {})
+            self._image_viewer.setup_requested.connect(self.setup_requested.emit)
+        self._image_viewer.set_node(
+            header, pix, node_key, nav or {}, image_path=image_path, image_path_state=image_path_state
+        )
         self._image_viewer.set_raise_on_next_show(activate)
         self._image_viewer.set_show_without_activating(not activate)
         self._image_viewer.show()
@@ -2094,10 +2250,18 @@ class HistoryMapDialog(QDialog):
         if self._image_viewer is not None and self._image_viewer.isVisible():
             self._image_viewer.clear_image()
 
-    def update_node_image(self, node_key: NodeKey, pix: QPixmap) -> None:
+    def update_node_image(
+        self,
+        node_key: NodeKey,
+        pix: QPixmap,
+        image_path: str | None = None,
+        image_path_state: str = "missing",
+    ) -> None:
         """非同期取得したフル画像で、ビューアが同じノードを表示中なら差し替える。"""
         if self._image_viewer is not None and self._image_viewer.isVisible():
-            self._image_viewer.update_image(node_key, pix)
+            self._image_viewer.update_image(
+                node_key, pix, image_path=image_path, image_path_state=image_path_state
+            )
 
     def image_viewer_state(self) -> tuple[bool, NodeKey | None]:
         if self._image_viewer is None or not self._image_viewer.isVisible():
@@ -2125,6 +2289,7 @@ class HistoryMapPanel(QWidget):
     bulk_erase_requested = Signal(list)
     bulk_delete_requested = Signal(list)
     reparent_requested = Signal(str, int, str, int)
+    setup_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -2191,8 +2356,8 @@ class HistoryMapPanel(QWidget):
         self._toggle_btn.setFixedSize(22, 22)
         self._toggle_btn.setStyleSheet(btn_ss)
         self._toggle_btn.clicked.connect(lambda: self._set_collapsed(not self._collapsed))
-        title = QLabel(tr("editor.parent_child_map_title"))
-        title.setStyleSheet(f"color: {ACCENT}; font-weight: bold;")
+        self._title_label = QLabel(tr("editor.parent_child_map_title"))
+        self._title_label.setStyleSheet(f"color: {ACCENT}; font-weight: bold;")
 
         self._goto_current_btn = QToolButton()
         self._goto_current_btn.setText("📍")
@@ -2237,7 +2402,7 @@ class HistoryMapPanel(QWidget):
         bar.setContentsMargins(6, 4, 6, 2)
         bar.setSpacing(4)
         bar.addWidget(self._toggle_btn)
-        bar.addWidget(title)
+        bar.addWidget(self._title_label)
         bar.addStretch()
         for w in (
             self._goto_current_btn,
@@ -2285,6 +2450,16 @@ class HistoryMapPanel(QWidget):
             self.setFixedHeight(self._expanded_height)
         if persist:
             _write_app_setting("parent_child_map_collapsed", "1" if self._collapsed else "0")
+
+    def retranslate_and_restyle(self) -> None:
+        self._title_label.setText(tr("editor.parent_child_map_title"))
+        self._goto_current_btn.setToolTip(tr("history_map.goto_current_tooltip"))
+        self._zoom_fit_btn.setToolTip(tr("history_map.zoom_fit_tooltip"))
+        self._zoom_out_btn.setToolTip(tr("history_map.zoom_out_tooltip"))
+        self._zoom_in_btn.setToolTip(tr("history_map.zoom_in_tooltip"))
+        self._zoom_reset_btn.setToolTip(tr("history_map.zoom_reset_tooltip"))
+        if self._image_viewer is not None and hasattr(self._image_viewer, "retranslate_and_restyle"):
+            self._image_viewer.retranslate_and_restyle()
 
     def rebuild(
         self,
@@ -2372,10 +2547,18 @@ class HistoryMapPanel(QWidget):
             on_done=_on_done,
         )
 
-    def update_node_image(self, node_key: NodeKey, pix: QPixmap) -> None:
+    def update_node_image(
+        self,
+        node_key: NodeKey,
+        pix: QPixmap,
+        image_path: str | None = None,
+        image_path_state: str = "missing",
+    ) -> None:
         """非同期取得したフル画像で、ビューアが同じノードを表示中なら差し替える。"""
         if self._image_viewer is not None and self._image_viewer.isVisible():
-            self._image_viewer.update_image(node_key, pix)
+            self._image_viewer.update_image(
+                node_key, pix, image_path=image_path, image_path_state=image_path_state
+            )
 
     def show_node_preview(
         self,
@@ -2384,12 +2567,17 @@ class HistoryMapPanel(QWidget):
         node_key: NodeKey,
         nav: dict[str, NodeKey | None] | None = None,
         activate: bool = True,
+        image_path: str | None = None,
+        image_path_state: str = "missing",
     ) -> None:
         if self._image_viewer is None:
             self._image_viewer = _HistoryImageViewerDialog(self)
             self._image_viewer.jump_requested.connect(self.jump_requested.emit)
             self._image_viewer.node_requested.connect(self.preview_requested.emit)
-        self._image_viewer.set_node(header, pix, node_key, nav or {})
+            self._image_viewer.setup_requested.connect(self.setup_requested.emit)
+        self._image_viewer.set_node(
+            header, pix, node_key, nav or {}, image_path=image_path, image_path_state=image_path_state
+        )
         self._image_viewer.set_raise_on_next_show(activate)
         self._image_viewer.set_show_without_activating(not activate)
         self._image_viewer.show()
@@ -2397,6 +2585,12 @@ class HistoryMapPanel(QWidget):
             self._image_viewer.raise_()
         else:
             self._image_viewer.set_show_without_activating(False)
+
+    def image_viewer_state(self) -> tuple[bool, NodeKey | None]:
+        if self._image_viewer is None or not self._image_viewer.isVisible():
+            return False, None
+        _save_geometry(self._image_viewer, "history_image_viewer_geometry")
+        return True, self._image_viewer._node_key
 
     def play_move_animation(
         self, old_key: NodeKey | None, new_key: NodeKey | None

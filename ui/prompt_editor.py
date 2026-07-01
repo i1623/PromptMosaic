@@ -758,6 +758,8 @@ class PromptEditor(QWidget):
             f"QTextEdit {{ background: {SURFACE1}; color: {TEXT}; "
             f"border: 1px solid {SURFACE2}; border-radius: 4px; padding: 2px; }}"
         )
+        if hasattr(self.parent_child_map, "retranslate_and_restyle"):
+            self.parent_child_map.retranslate_and_restyle()
 
         self._doc.negative.middle.label = tr("editor.negative_label")
         for bw in self.all_block_widgets():

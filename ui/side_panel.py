@@ -18,8 +18,8 @@ import hashlib
 import io
 import json
 import os
-import shutil
 import sqlite3
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -38,6 +38,7 @@ from PySide6.QtGui import QPixmap, QIcon, QColor, QDrag, QBrush
 import db.app_db as _app_db
 import db.history_db as _history_db
 import db.notes_db as _notes_db
+from core.image_resolver import resolve_generation_image_path
 import core.local_storage as local_storage
 from core.prompt_builder import GroupTile, PromptDocument
 from core.i18n import tr
@@ -78,6 +79,7 @@ _ROLE_HISTORY_BG = Qt.ItemDataRole.UserRole + 17
 _ROLE_IS_LINEAGE_SINGLE = Qt.ItemDataRole.UserRole + 18
 _ROLE_HISTORY_FG = Qt.ItemDataRole.UserRole + 19  # 解決済みの履歴文字色（ツリー上書き>設定既定）
 _ROLE_FOCUS_FLASH = Qt.ItemDataRole.UserRole + 20
+_ROLE_DRAFT_HISTORY_DB = Qt.ItemDataRole.UserRole + 21
 
 
 class _StarFilter(QWidget):
@@ -197,9 +199,11 @@ class _GenerationItemDelegate(QStyledItemDelegate):
         editor.setGeometry(title_rect.adjusted(0, 1, 0, -1))
 
     def paint(self, painter, option, index) -> None:
-        if index.data(_ROLE_TYPE) != "generation":
+        item_type = index.data(_ROLE_TYPE)
+        if item_type not in ("generation", "draft"):
             super().paint(painter, option, index)
             return
+        is_draft = item_type == "draft"
 
         painter.save()
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
@@ -213,7 +217,12 @@ class _GenerationItemDelegate(QStyledItemDelegate):
         line_rects: list[QRect] = layout["lines"]  # type: ignore[assignment]
 
         icon = index.data(Qt.ItemDataRole.DecorationRole)
-        if isinstance(icon, QIcon) and not icon.isNull():
+        if is_draft:
+            painter.fillRect(thumb_rect, QColor(SURFACE1))
+            painter.setPen(QColor(ACCENT if selected else SUBTEXT))
+            painter.setFont(ui_font(3, bold=True))
+            painter.drawText(thumb_rect, Qt.AlignmentFlag.AlignCenter, tr("history_map.draft_icon"))
+        elif isinstance(icon, QIcon) and not icon.isNull():
             pix = icon.pixmap(icon_size, icon_size)
             x = thumb_rect.left() + max(0, (thumb_rect.width() - pix.width()) // 2)
             y = thumb_rect.top() + max(0, (thumb_rect.height() - pix.height()) // 2)
@@ -240,7 +249,8 @@ class _GenerationItemDelegate(QStyledItemDelegate):
             map_btn_rect,
             Qt.AlignmentFlag.AlignCenter,
             (
-                "🚩" if index.data(_ROLE_IS_LINEAGE_SINGLE)
+                "🗺️" if is_draft
+                else "🚩" if index.data(_ROLE_IS_LINEAGE_SINGLE)
                 else "👑" if index.data(_ROLE_IS_LINEAGE_ROOT)
                 else "🗺️"
             ),
@@ -254,7 +264,7 @@ class _GenerationItemDelegate(QStyledItemDelegate):
         model = str(index.data(_ROLE_MODEL) or "")
         params = str(index.data(_ROLE_PARAMS) or "")
         rating = int(index.data(_ROLE_RATING) or 0)
-        stars = "★" * rating + "☆" * (5 - rating)
+        stars = tr("history_map.draft_badge") if is_draft else "★" * rating + "☆" * (5 - rating)
         lines = [gen_no, created, stars, title, model, params]
 
         # 解決済みの履歴文字色（ツリー上書き > 設定既定）。主要行はこの色、
@@ -358,14 +368,14 @@ class _ThumbWorker(QThread):
                     raw = None
             if raw is None:
                 lp_row = conn.execute(
-                    "SELECT local_path FROM generations WHERE id=?", (gen_id,)
+                    "SELECT local_path, invoke_image_name FROM generations WHERE id=?", (gen_id,)
                 ).fetchone()
                 local_path = str(lp_row[0] or "") if lp_row else ""
-                if local_path:
+                image_name_for_resolve = str(lp_row[1] or "") if lp_row else image_name
+                image_path = resolve_generation_image_path(local_path, image_name_for_resolve)
+                if image_path:
                     try:
-                        p = Path(local_path)
-                        if p.exists():
-                            raw = p.read_bytes()
+                        raw = image_path.read_bytes()
                     except Exception:
                         raw = None
             if raw is None:
@@ -406,6 +416,8 @@ class GenerationTreeWidget(QTreeWidget):
 
     gen_double_clicked    = Signal(int)
     gen_clicked           = Signal(int)
+    draft_clicked         = Signal(str, int)
+    draft_delete_requested = Signal(str, int)
     gen_full_load_requested = Signal(int)
     gen_thumb_refresh_requested = Signal(int)
     group_focused         = Signal(object)
@@ -413,8 +425,9 @@ class GenerationTreeWidget(QTreeWidget):
     rating_changed        = Signal(int, int)
     title_changed         = Signal(int, str)
     tile_mode_requested   = Signal(int)
+    draft_tile_mode_requested = Signal(str, int)
     history_map_requested = Signal(int)
-    history_reconnect_requested = Signal(int)
+    draft_history_map_requested = Signal(str, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -492,7 +505,24 @@ class GenerationTreeWidget(QTreeWidget):
                 item.setExpanded(not item.isExpanded())
                 event.accept()
                 return
-            if item and item.data(0, _ROLE_TYPE) == "generation":
+            if item and item.data(0, _ROLE_TYPE) in ("generation", "draft"):
+                if item.data(0, _ROLE_TYPE) == "draft":
+                    owner = item.data(0, _ROLE_DRAFT_HISTORY_DB) or ""
+                    draft_id = item.data(0, _ROLE_ID)
+                    if self._tile_mode_at_pos(item, event.pos()):
+                        self._suppress_drag = True
+                        if owner and draft_id is not None:
+                            self.draft_tile_mode_requested.emit(str(owner), int(draft_id))
+                        event.accept()
+                        return
+                    if self._history_map_at_pos(item, event.pos()):
+                        self._suppress_drag = True
+                        if owner and draft_id is not None:
+                            self.draft_history_map_requested.emit(str(owner), int(draft_id))
+                        event.accept()
+                        return
+                    self._suppress_drag = False
+                    return super().mousePressEvent(event)
                 if self._tile_mode_at_pos(item, event.pos()):
                     self._suppress_drag = True
                     gen_id = item.data(0, _ROLE_ID)
@@ -623,6 +653,11 @@ class GenerationTreeWidget(QTreeWidget):
     def _on_dbl_click(self, item: QTreeWidgetItem, col: int) -> None:
         if item.data(0, _ROLE_TYPE) == "generation":
             self.gen_clicked.emit(item.data(0, _ROLE_ID))
+        elif item.data(0, _ROLE_TYPE) == "draft":
+            owner = item.data(0, _ROLE_DRAFT_HISTORY_DB) or ""
+            draft_id = item.data(0, _ROLE_ID)
+            if owner and draft_id is not None:
+                self.draft_clicked.emit(str(owner), int(draft_id))
 
     # ── コンテキストメニュー ─────────────────────────────
 
@@ -681,11 +716,6 @@ class GenerationTreeWidget(QTreeWidget):
 
                 menu.addSeparator()
 
-                act_reconnect = menu.addAction(tr("side_panel.ctx_reconnect_history_map"))
-                act_reconnect.triggered.connect(lambda: self.history_reconnect_requested.emit(gen_id))
-
-                menu.addSeparator()
-
                 # ローカル画像操作（local_path が設定されている時のみ有効）
                 _lp_row = _history_db.fetchone(
                     "SELECT local_path, invoke_image_name FROM generations WHERE id=?",
@@ -693,19 +723,20 @@ class GenerationTreeWidget(QTreeWidget):
                 )
                 _local_path = _lp_row["local_path"] if _lp_row else None
                 _image_name = _lp_row["invoke_image_name"] if _lp_row else None
+                _resolved_image = resolve_generation_image_path(_local_path, _image_name)
 
                 act_open_img = menu.addAction(tr("side_panel.ctx_open_image"))
-                act_open_img.setEnabled(bool(_local_path and Path(_local_path).exists()))
+                act_open_img.setEnabled(_resolved_image is not None or bool(_image_name))
                 act_open_img.triggered.connect(lambda: self._open_gen_image(gen_id))
 
                 act_open_dir = menu.addAction(tr("side_panel.ctx_open_folder"))
-                act_open_dir.setEnabled(bool(_local_path and Path(_local_path).parent.exists()))
+                act_open_dir.setEnabled(bool(_resolved_image and _resolved_image.parent.exists()) or bool(_image_name))
                 act_open_dir.triggered.connect(lambda: self._open_gen_folder(gen_id))
 
                 # サムネ更新（取得元: API → ローカル保存画像。どちらも無ければ無効）
                 act_thumb = menu.addAction(tr("side_panel.ctx_refresh_thumb"))
                 act_thumb.setEnabled(
-                    bool(_image_name) or bool(_local_path and Path(_local_path).exists())
+                    bool(_image_name) or _resolved_image is not None
                 )
                 act_thumb.triggered.connect(
                     lambda: self.gen_thumb_refresh_requested.emit(gen_id)
@@ -726,6 +757,33 @@ class GenerationTreeWidget(QTreeWidget):
                 act_trash = menu.addAction(tr("side_panel.ctx_trash_one"))
                 act_trash.triggered.connect(lambda: self._trash_generation(gen_id))
 
+            elif item_type == "draft":
+                owner = item.data(0, _ROLE_DRAFT_HISTORY_DB) or ""
+                draft_id = item.data(0, _ROLE_ID)
+                act_prompt = menu.addAction(tr("side_panel.ctx_prompt_load"))
+                act_prompt.triggered.connect(
+                    lambda: self.draft_clicked.emit(str(owner), int(draft_id))
+                )
+                act_map = menu.addAction(tr("editor.history_map_tooltip"))
+                act_map.triggered.connect(
+                    lambda: self.draft_history_map_requested.emit(str(owner), int(draft_id))
+                )
+                menu.addSeparator()
+                has_children = True
+                try:
+                    import db.hmap_db as _hmap_db
+                    has_children = bool(_hmap_db.child_keys(f"draft:{owner}", int(draft_id)))
+                except Exception:
+                    has_children = True
+                act_delete = menu.addAction(
+                    tr("history_map.menu_delete_draft_blocked")
+                    if has_children else tr("history_map.menu_delete")
+                )
+                act_delete.setEnabled(not has_children)
+                act_delete.triggered.connect(
+                    lambda: self.draft_delete_requested.emit(str(owner), int(draft_id))
+                )
+
         menu.exec(self.viewport().mapToGlobal(pos))
 
     # ── グループ操作 ─────────────────────────────────────
@@ -738,10 +796,9 @@ class GenerationTreeWidget(QTreeWidget):
     def _create_group(self, parent_id: int | None) -> None:
         name, ok = QInputDialog.getText(self, tr("side_panel.new_group_title"), tr("side_panel.new_group_label"))
         if ok and name.strip():
-            folder_path = str(local_storage.default_group_folder(name.strip(), parent_id))
             _history_db.execute(
                 "INSERT INTO generation_groups (name, parent_id, folder_path) VALUES (?, ?, ?)",
-                (name.strip(), parent_id, folder_path),
+                (name.strip(), parent_id, None),
             )
             self.tree_changed.emit()
 
@@ -894,26 +951,59 @@ class GenerationTreeWidget(QTreeWidget):
                 )
 
     def _open_gen_image(self, gen_id: int) -> None:
-        """local_path の画像ファイルをOSの関連アプリで開く"""
-        row = _history_db.fetchone("SELECT local_path FROM generations WHERE id=?", (gen_id,))
-        if not row or not row["local_path"]:
+        """Resolved image fileをOSの関連アプリで開く。"""
+        row = _history_db.fetchone(
+            "SELECT local_path, invoke_image_name FROM generations WHERE id=?", (gen_id,)
+        )
+        if not row:
             return
-        path = Path(row["local_path"])
-        if path.exists():
+        path = resolve_generation_image_path(row["local_path"], row["invoke_image_name"])
+        if path:
             os.startfile(str(path))
-        else:
-            QMessageBox.warning(self, tr("side_panel.no_image_title"), tr("side_panel.no_image_msg", path=path))
+            return
+        image_name = str(row["invoke_image_name"] or "")
+        temp_path = self._materialize_invoke_image(image_name)
+        if temp_path is not None:
+            os.startfile(str(temp_path))
+            return
+        missing = row["local_path"] or row["invoke_image_name"] or ""
+        QMessageBox.warning(self, tr("side_panel.no_image_title"), tr("side_panel.no_image_msg", path=missing))
 
     def _open_gen_folder(self, gen_id: int) -> None:
-        """local_path の親フォルダをエクスプローラーで開く"""
-        row = _history_db.fetchone("SELECT local_path FROM generations WHERE id=?", (gen_id,))
-        if not row or not row["local_path"]:
+        """Resolved image fileの親フォルダをエクスプローラーで開く。"""
+        row = _history_db.fetchone(
+            "SELECT local_path, invoke_image_name FROM generations WHERE id=?", (gen_id,)
+        )
+        if not row:
             return
-        folder = Path(row["local_path"]).parent
+        path = resolve_generation_image_path(row["local_path"], row["invoke_image_name"])
+        if path is None:
+            temp_path = self._materialize_invoke_image(str(row["invoke_image_name"] or ""))
+            if temp_path is not None and temp_path.parent.exists():
+                os.startfile(str(temp_path.parent))
+                return
+            missing = row["local_path"] or row["invoke_image_name"] or ""
+            QMessageBox.warning(self, tr("side_panel.no_folder_title"), tr("side_panel.no_folder_msg", path=missing))
+            return
+        folder = path.parent
         if folder.exists():
             os.startfile(str(folder))
         else:
             QMessageBox.warning(self, tr("side_panel.no_folder_title"), tr("side_panel.no_folder_msg", path=folder))
+
+    def _materialize_invoke_image(self, image_name: str) -> Path | None:
+        image_name = str(image_name or "").strip()
+        if not image_name or self._client is None:
+            return None
+        try:
+            data = self._client.image_full(image_name)
+            temp_dir = Path(tempfile.gettempdir()) / "PromptMosaic" / "invoke_images"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            temp_path = temp_dir / image_name
+            temp_path.write_bytes(data)
+            return temp_path
+        except Exception:
+            return None
 
     # ── 生成操作 ─────────────────────────────────────────
 
@@ -1108,7 +1198,7 @@ class GenerationTreeWidget(QTreeWidget):
             event.ignore()
 
     def _handle_external_file_drop(self, event, gen_id: int) -> None:
-        """OS からドロップされたファイルを生成の保存先フォルダにコピーし local_path を更新する"""
+        """OS からドロップされたファイルを外部参照として local_path に記録する。"""
         gen_row = _history_db.fetchone(
             "SELECT group_id FROM generations WHERE id=?", (gen_id,)
         )
@@ -1116,19 +1206,14 @@ class GenerationTreeWidget(QTreeWidget):
             event.ignore()
             return
 
-        dest_dir = local_storage.resolve_folder_path(gen_row["group_id"])
-
         for url in event.mimeData().urls():
             if not url.isLocalFile():
                 continue
             src_path = Path(url.toLocalFile())
             try:
-                dest_dir.mkdir(parents=True, exist_ok=True)
-                dest = dest_dir / src_path.name
-                shutil.copy2(str(src_path), str(dest))
                 _history_db.execute(
                     "UPDATE generations SET local_path=? WHERE id=?",
-                    (str(dest), gen_id),
+                    (str(src_path), gen_id),
                 )
                 event.accept()
                 self.tree_changed.emit()
@@ -1221,17 +1306,21 @@ class HistoryTab(QWidget):
     """グループ＋生成履歴をツリーで表示するタブ"""
 
     load_requested      = Signal(int)    # generation_id（プロンプトのみ）
+    draft_load_requested = Signal(str, int)
+    draft_delete_requested = Signal(str, int)
     full_load_requested = Signal(int)    # generation_id（全パラメータ）
     sync_requested      = Signal()
     group_focus_changed = Signal(object) # group_id (int | None)
     tile_mode_requested = Signal(int)
+    draft_tile_mode_requested = Signal(str, int)
     history_map_requested = Signal(int)
-    history_reconnect_requested = Signal(int)
+    draft_history_map_requested = Signal(str, int)
 
     def __init__(self, client: "InvokeClient | None" = None, parent=None):
         super().__init__(parent)
         self._client = client
         self._id_to_item: dict[int, QTreeWidgetItem] = {}
+        self._draft_key_to_item: dict[tuple[str, int], QTreeWidgetItem] = {}
         self._thumb_worker: _ThumbWorker | None = None
         self._icon_size = _DEFAULT_ICON_SIZE
         self._last_gen_count: int = 0
@@ -1306,11 +1395,14 @@ class HistoryTab(QWidget):
         self._tree = GenerationTreeWidget()
         self._tree.gen_double_clicked.connect(self._on_gen_dbl_click)
         self._tree.gen_clicked.connect(self.load_requested.emit)  # double-click → load
+        self._tree.draft_clicked.connect(self.draft_load_requested.emit)
+        self._tree.draft_delete_requested.connect(self.draft_delete_requested.emit)
         self._tree.gen_full_load_requested.connect(self.full_load_requested.emit)
         self._tree.gen_thumb_refresh_requested.connect(self._refresh_gen_thumbnail)
         self._tree.tile_mode_requested.connect(self.tile_mode_requested.emit)
+        self._tree.draft_tile_mode_requested.connect(self.draft_tile_mode_requested.emit)
         self._tree.history_map_requested.connect(self.history_map_requested.emit)
-        self._tree.history_reconnect_requested.connect(self.history_reconnect_requested.emit)
+        self._tree.draft_history_map_requested.connect(self.draft_history_map_requested.emit)
         self._tree.group_focused.connect(self._on_group_focused)
         self._tree.tree_changed.connect(self.refresh)
         self._tree.rating_changed.connect(self._on_generation_rating_changed)
@@ -1564,6 +1656,7 @@ class HistoryTab(QWidget):
         try:
             self._tree.clear()
             self._id_to_item.clear()
+            self._draft_key_to_item.clear()
 
             # ポーリング用カウントを同期（refresh 後は差分なしと見なす）
             cnt_row = _history_db.fetchone(
@@ -1612,6 +1705,20 @@ class HistoryTab(QWidget):
                     )
                     if row["group_id"] in {g["id"] for g in all_groups}
                 }
+                try:
+                    import db.hmap_db as _hmap_db
+                    from db.connections import get_active_history_name
+                    draft_counts = {
+                        row["group_id"]: row["cnt"]
+                        for row in _hmap_db.fetchall(
+                            "SELECT group_id, COUNT(*) AS cnt FROM editor_history_draft_nodes "
+                            "WHERE owner_history_db=? AND deleted_at IS NULL GROUP BY group_id",
+                            (get_active_history_name(),),
+                        )
+                        if row["group_id"] in {g["id"] for g in all_groups}
+                    }
+                except Exception:
+                    draft_counts = {}
                 group_map   = {g["id"]: g for g in all_groups}
                 sorted_grps = self._topo_sort(list(all_groups), group_map)
                 group_items: dict[int, QTreeWidgetItem] = {}
@@ -1638,7 +1745,7 @@ class HistoryTab(QWidget):
                             self._tree.addTopLevelItem(it)
 
                 for gid, item in group_items.items():
-                    if gen_counts.get(gid, 0) > 0 and item.childCount() == 0:
+                    if (gen_counts.get(gid, 0) + draft_counts.get(gid, 0)) > 0 and item.childCount() == 0:
                         item.addChild(self._make_placeholder_item())
 
                 for gid in expanded_ids:
@@ -1722,6 +1829,9 @@ class HistoryTab(QWidget):
         ident = item.data(0, _ROLE_ID)
         if typ in ("group", "generation") and ident is not None:
             return str(typ), int(ident)
+        if typ == "draft" and ident is not None:
+            owner = item.data(0, _ROLE_DRAFT_HISTORY_DB) or ""
+            return f"draft:{owner}", int(ident)
         return None
 
     def _restore_tree_state(
@@ -1808,6 +1918,43 @@ class HistoryTab(QWidget):
         self._apply_gen_item_data(it, row)
         return it
 
+    def _make_draft_item(self, row) -> "QTreeWidgetItem":
+        it = QTreeWidgetItem()
+        owner = str(row["owner_history_db"])
+        draft_id = int(row["id"])
+        created = str(row["updated_at"] or row["created_at"] or "")[:16]
+        title = str(row["title"] or tr("history_map.draft_badge"))
+        parent_label = ""
+        parent_db = str(row["parent_db"] or "")
+        parent_id = row["parent_id"]
+        if parent_db and parent_id is not None:
+            parent_label = tr("side_panel.draft_from", id=int(parent_id))
+
+        it.setText(0, "")
+        it.setData(0, _ROLE_TYPE, "draft")
+        it.setData(0, _ROLE_ID, draft_id)
+        it.setData(0, _ROLE_DRAFT_HISTORY_DB, owner)
+        it.setData(0, _ROLE_IMAGE_NAME, "")
+        it.setData(0, _ROLE_THUMB_LOADED, True)
+        it.setData(0, _ROLE_RATING, 0)
+        it.setData(0, _ROLE_TITLE, title)
+        it.setData(0, _ROLE_DETAIL, "")
+        it.setData(0, _ROLE_FAVORITE, False)
+        it.setData(0, _ROLE_GEN_NO, tr("history_map.draft_node_label", n=draft_id))
+        it.setData(0, _ROLE_CREATED, created)
+        it.setData(0, _ROLE_MODEL, parent_label)
+        it.setData(0, _ROLE_PARAMS, tr("side_panel.draft_no_image"))
+        it.setData(0, _ROLE_REVIEW_TEXT, str(row["memo_text"] or ""))
+        it.setData(0, _ROLE_IS_LINEAGE_ROOT, False)
+        it.setData(0, _ROLE_IS_LINEAGE_SINGLE, False)
+        it.setData(0, _ROLE_HISTORY_BG, self._history_background_color_for_key(f"draft:{owner}", draft_id))
+        it.setData(0, _ROLE_HISTORY_FG, self._history_text_color_for_key(f"draft:{owner}", draft_id))
+        row_height = max(self._icon_size + 8, ui_font(-1).pointSize() * 9 + 30, 112)
+        it.setSizeHint(0, QSize(self._icon_size + 220, row_height))
+        it.setFont(0, ui_font(-1))
+        it.setFlags((it.flags() & ~Qt.ItemFlag.ItemIsEditable) & ~Qt.ItemFlag.ItemIsDropEnabled)
+        return it
+
     @staticmethod
     def _is_lineage_root(gen_id: int) -> bool:
         """この生成がアクティブ履歴の系譜開祖（親なしノード）かどうか。"""
@@ -1849,12 +1996,7 @@ class HistoryTab(QWidget):
                 return True   # 系譜マップに未登録＝単独（旗）
             if node["parent_db"] is not None:
                 return False  # 親がいる＝ツリーの一部（マップ）
-            child = _hmap_db.fetchone(
-                "SELECT 1 FROM editor_history_nodes "
-                "WHERE parent_db=? AND parent_id=? LIMIT 1",
-                (history_db, gen_id),
-            )
-            return child is None
+            return not _hmap_db.child_keys(history_db, gen_id)
         except Exception:
             return False
 
@@ -1884,6 +2026,29 @@ class HistoryTab(QWidget):
             return SURFACE0
 
     @staticmethod
+    def _history_background_color_for_key(history_db: str, history_id: int) -> str:
+        try:
+            import db.app_db as _app_db
+            import db.hmap_db as _hmap_db
+            root = _hmap_db.find_root(history_db, int(history_id)) or (history_db, int(history_id))
+            safe_db = "".join(ch if ch.isalnum() else "_" for ch in str(root[0]))
+            key = f"history_bg_color_{safe_db}_{int(root[1])}"
+            row = _app_db.fetchone("SELECT value FROM app_settings WHERE key=?", (key,))
+            if row and row["value"]:
+                return str(row["value"])
+            digest = hashlib.sha1(f"{root[0]}:{int(root[1])}".encode("utf-8")).hexdigest()
+            color = QColor()
+            color.setHsv(int(digest[:8], 16) % 360, 95, 78)
+            value = color.name()
+            _app_db.execute(
+                "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
+                (key, value),
+            )
+            return value
+        except Exception:
+            return SURFACE0
+
+    @staticmethod
     def _history_text_color(gen_id: int) -> str:
         """ツリー単位の文字色上書き > 設定のテーマ別既定(styles.HISTORY_TEXT)。"""
         try:
@@ -1892,6 +2057,21 @@ class HistoryTab(QWidget):
             from db.connections import get_active_history_name
             history_db = get_active_history_name()
             root = _hmap_db.find_root(history_db, int(gen_id)) or (history_db, int(gen_id))
+            safe_db = "".join(ch if ch.isalnum() else "_" for ch in str(root[0]))
+            key = f"history_text_color_{safe_db}_{int(root[1])}"
+            row = _app_db.fetchone("SELECT value FROM app_settings WHERE key=?", (key,))
+            if row and row["value"]:
+                return str(row["value"])
+        except Exception:
+            pass
+        return styles.HISTORY_TEXT
+
+    @staticmethod
+    def _history_text_color_for_key(history_db: str, history_id: int) -> str:
+        try:
+            import db.app_db as _app_db
+            import db.hmap_db as _hmap_db
+            root = _hmap_db.find_root(history_db, int(history_id)) or (history_db, int(history_id))
             safe_db = "".join(ch if ch.isalnum() else "_" for ch in str(root[0]))
             key = f"history_text_color_{safe_db}_{int(root[1])}"
             row = _app_db.fetchone("SELECT value FROM app_settings WHERE key=?", (key,))
@@ -2005,6 +2185,40 @@ class HistoryTab(QWidget):
         QTimer.singleShot(160, self._load_visible_thumbnails)
         return True
 
+    def focus_draft(self, owner_history_db: str, draft_id: int, *, animate: bool = True, flash: bool = True) -> bool:
+        owner_history_db = str(owner_history_db)
+        draft_id = int(draft_id)
+        item = self._draft_key_to_item.get((owner_history_db, draft_id))
+        if item is None and not self._has_filter():
+            try:
+                import db.hmap_db as _hmap_db
+                row = _hmap_db.fetch_draft_node(owner_history_db, draft_id)
+            except Exception:
+                row = None
+            if row is not None and row["group_id"] is not None:
+                group_item = self._find_group_item(int(row["group_id"]))
+                if group_item is None:
+                    self.refresh()
+                    group_item = self._find_group_item(int(row["group_id"]))
+                if group_item is not None:
+                    self._expand_group_path(group_item)
+                    if not group_item.data(0, _ROLE_LOADED):
+                        self._load_group_generations(group_item)
+                    group_item.setExpanded(True)
+                    self._sync_group_folder_icon(group_item)
+                    self._persist_expanded_group_ids()
+                    item = self._draft_key_to_item.get((owner_history_db, draft_id))
+        if item is None:
+            return False
+        self._select_generation_item(item)
+        if animate:
+            QTimer.singleShot(0, lambda it=item: self._scroll_to_item_animated(it))
+        else:
+            self._tree.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtCenter)
+        if flash:
+            QTimer.singleShot(120, lambda it=item: self._flash_generation_item(it))
+        return True
+
     def _expand_group_path(self, item: QTreeWidgetItem) -> None:
         chain: list[QTreeWidgetItem] = []
         cur: QTreeWidgetItem | None = item
@@ -2017,7 +2231,7 @@ class HistoryTab(QWidget):
             self._sync_group_folder_icon(group_item)
 
     def _scroll_to_item_animated(self, item: QTreeWidgetItem) -> None:
-        if item.data(0, _ROLE_TYPE) != "generation":
+        if item.data(0, _ROLE_TYPE) not in ("generation", "draft"):
             return
         bar = self._tree.verticalScrollBar()
         start = bar.value()
@@ -2037,7 +2251,7 @@ class HistoryTab(QWidget):
         anim.start()
 
     def _flash_generation_item(self, item: QTreeWidgetItem) -> None:
-        if item.data(0, _ROLE_TYPE) != "generation":
+        if item.data(0, _ROLE_TYPE) not in ("generation", "draft"):
             return
         phases = [1, 2, 3, 4, 5, 6, 7, 8, 0]
 
@@ -2123,10 +2337,57 @@ class HistoryTab(QWidget):
             self._generation_select_sql("g.deleted_at IS NULL AND g.group_id = ?"),
             (gid,),
         )
+        draft_rows = []
+        active_history = ""
+        try:
+            import db.hmap_db as _hmap_db
+            from db.connections import get_active_history_name
+            active_history = get_active_history_name()
+            draft_rows = _hmap_db.fetchall(
+                """
+                SELECT id, owner_history_db, parent_db, parent_id, group_id, prompt_json,
+                       memo_text, title, created_at, updated_at, deleted_at
+                  FROM editor_history_draft_nodes
+                 WHERE owner_history_db=? AND group_id=? AND deleted_at IS NULL
+                """,
+                (active_history, gid),
+            )
+        except Exception:
+            draft_rows = []
+
+        drafts_by_parent: dict[tuple[str, int], list] = {}
+        for row in draft_rows:
+            if row["parent_db"] is None or row["parent_id"] is None:
+                continue
+            drafts_by_parent.setdefault(
+                (str(row["parent_db"]), int(row["parent_id"])),
+                [],
+            ).append(row)
+        for bucket in drafts_by_parent.values():
+            bucket.sort(key=lambda r: (str(r["updated_at"] or r["created_at"] or ""), int(r["id"])), reverse=True)
+
+        shown_drafts: set[tuple[str, int]] = set()
         for row in rows:
+            for draft in drafts_by_parent.get((active_history, int(row["id"])), []):
+                draft_item = self._make_draft_item(draft)
+                item.addChild(draft_item)
+                draft_key = (str(draft["owner_history_db"]), int(draft["id"]))
+                self._draft_key_to_item[draft_key] = draft_item
+                shown_drafts.add(draft_key)
             gen_item = self._make_gen_item(row)
             item.addChild(gen_item)
             self._id_to_item[row["id"]] = gen_item
+
+        # 親画像が非表示・削除済みの場合だけ、ドラフトを最後に退避表示する。
+        remaining = [
+            row for row in draft_rows
+            if (str(row["owner_history_db"]), int(row["id"])) not in shown_drafts
+        ]
+        remaining.sort(key=lambda r: (str(r["updated_at"] or r["created_at"] or ""), int(r["id"])), reverse=True)
+        for row in remaining:
+                draft_item = self._make_draft_item(row)
+                item.addChild(draft_item)
+                self._draft_key_to_item[(str(row["owner_history_db"]), int(row["id"]))] = draft_item
         item.setData(0, _ROLE_LOADED, True)
 
     def _load_visible_thumbnails(self) -> None:
@@ -2665,6 +2926,8 @@ class TrashTab(QWidget):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
+        # 履歴から完全削除しても、元画像ファイルは絶対に削除しない。
+        # ここで消すのは PromptMosaic のDB行だけ。
         for gen_id in ids:
             _history_db.execute("DELETE FROM generations WHERE id = ?", (gen_id,))
         self.refresh()
@@ -2685,6 +2948,8 @@ class TrashTab(QWidget):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
+        # ゴミ箱を空にしても、元画像ファイルは絶対に削除しない。
+        # ここで消すのは PromptMosaic のDB行だけ。
         _history_db.execute(
             "DELETE FROM generations WHERE deleted_at IS NOT NULL"
         )
@@ -2697,6 +2962,7 @@ class _HistoryTileClone(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._generation_id: int | None = None
+        self._draft_key: tuple[str, int] | None = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -2740,6 +3006,9 @@ class _HistoryTileClone(QWidget):
     def generation_id(self) -> int | None:
         return self._generation_id
 
+    def draft_key(self) -> tuple[str, int] | None:
+        return self._draft_key
+
     def set_new_count(self, count: int) -> None:
         if count > 0:
             self._new_badge.setText(tr("side_panel.history_tile_new_badge", n=count))
@@ -2753,6 +3022,7 @@ class _HistoryTileClone(QWidget):
             return False
         self._expand_open_group_descendants(doc)
         self._generation_id = int(generation_id)
+        self._draft_key = None
         self._editor.set_document(doc)
         memo_row = _history_db.fetchone(
             "SELECT review_text FROM image_reviews WHERE generation_id=?",
@@ -2761,6 +3031,24 @@ class _HistoryTileClone(QWidget):
         self._editor.set_memo((memo_row["review_text"] or "") if memo_row else "")
         self._load_thumbnail(generation_id)
         self._title_lbl.setText(tr("side_panel.history_tile_title", id=generation_id))
+        return True
+
+    def load_draft(self, owner_history_db: str, draft_id: int) -> bool:
+        import db.hmap_db as _hmap_db
+        row = _hmap_db.fetch_draft_node(str(owner_history_db), int(draft_id))
+        if row is None:
+            return False
+        try:
+            doc = PromptDocument.from_json(str(row["prompt_json"] or ""))
+        except Exception:
+            return False
+        self._expand_open_group_descendants(doc)
+        self._generation_id = None
+        self._draft_key = (str(owner_history_db), int(draft_id))
+        self._editor.set_document(doc)
+        self._editor.set_memo(str(row["memo_text"] or ""))
+        self._load_draft_thumbnail()
+        self._title_lbl.setText(tr("side_panel.history_tile_draft_title", id=draft_id))
         return True
 
     @staticmethod
@@ -2779,6 +3067,10 @@ class _HistoryTileClone(QWidget):
 
     def _load_thumbnail(self, generation_id: int) -> None:
         self._thumb_lbl.clear()
+        self._thumb_lbl.setFont(ui_font())
+        self._thumb_lbl.setStyleSheet(
+            f"background: {SURFACE1}; border: 1px solid {SURFACE2}; border-radius: 3px;"
+        )
         row = _history_db.fetchone(
             "SELECT invoke_image_name, local_path FROM generations WHERE id=?",
             (generation_id,),
@@ -2786,8 +3078,10 @@ class _HistoryTileClone(QWidget):
         image_name = str(row["invoke_image_name"] or "") if row else ""
         local_path = str(row["local_path"] or "") if row else ""
         pix = self._load_cached_thumbnail(generation_id, image_name)
-        if pix is None and local_path:
-            pix = QPixmap(local_path)
+        if pix is None:
+            image_path = resolve_generation_image_path(local_path, image_name)
+            if image_path:
+                pix = QPixmap(str(image_path))
         if pix is not None and not pix.isNull():
             self._thumb_lbl.setPixmap(
                 pix.scaled(
@@ -2797,6 +3091,15 @@ class _HistoryTileClone(QWidget):
                     Qt.TransformationMode.SmoothTransformation,
                 )
             )
+
+    def _load_draft_thumbnail(self) -> None:
+        self._thumb_lbl.clear()
+        self._thumb_lbl.setText(tr("history_map.draft_icon"))
+        self._thumb_lbl.setFont(ui_font(3, bold=True))
+        self._thumb_lbl.setStyleSheet(
+            f"background: {SURFACE1}; color: {ACCENT}; "
+            f"border: 1px solid {SURFACE2}; border-radius: 3px;"
+        )
 
     @staticmethod
     def _load_cached_thumbnail(generation_id: int, image_name: str) -> QPixmap | None:
@@ -2813,6 +3116,8 @@ class _HistoryTileClone(QWidget):
         self._exit_btn.setText(tr("side_panel.history_tile_exit"))
         if self._generation_id is not None:
             self._title_lbl.setText(tr("side_panel.history_tile_title", id=self._generation_id))
+        elif self._draft_key is not None:
+            self._title_lbl.setText(tr("side_panel.history_tile_draft_title", id=self._draft_key[1]))
 
 
 
@@ -2822,13 +3127,15 @@ class SidePanel(QWidget):
     """右ペイン: 履歴ツリー + ノートのタブコンテナ"""
 
     load_generation_requested      = Signal(int)
+    load_draft_requested           = Signal(str, int)
+    delete_draft_requested         = Signal(str, int)
     full_load_generation_requested = Signal(int)
     sync_history_requested         = Signal()
     group_focus_changed            = Signal(object)  # int | None
     history_tile_mode_changed      = Signal(bool)
-    history_tile_generation_changed = Signal(object)  # int | None
+    history_tile_generation_changed = Signal(object)  # int | ("draft", owner, id) | None
     history_map_requested          = Signal(int)
-    history_reconnect_requested    = Signal(int)
+    draft_history_map_requested    = Signal(str, int)
     history_changed                = Signal()  # 履歴行の増減/ゴミ箱出入り（マップ等の追従用）
 
     def __init__(self, client: "InvokeClient | None" = None, parent=None):
@@ -2836,8 +3143,9 @@ class SidePanel(QWidget):
         self._client = client
         self._history_tile_mode = False
         self._history_tile_new_count = 0
+        self._history_tile_exit_refresh_pending = False
         self._build_ui()
-        QTimer.singleShot(0, self._restore_history_tile_mode)
+        QTimer.singleShot(650, self._restore_history_tile_mode)
 
     def _build_ui(self) -> None:
         lay = QVBoxLayout(self)
@@ -2851,12 +3159,15 @@ class SidePanel(QWidget):
         self._history_tile_clone = _HistoryTileClone()
 
         self._history_tab.load_requested.connect(self.load_generation_requested.emit)
+        self._history_tab.draft_load_requested.connect(self.load_draft_requested.emit)
+        self._history_tab.draft_delete_requested.connect(self.delete_draft_requested.emit)
         self._history_tab.full_load_requested.connect(self.full_load_generation_requested.emit)
         self._history_tab.sync_requested.connect(self.sync_history_requested.emit)
         self._history_tab.group_focus_changed.connect(self.group_focus_changed.emit)
         self._history_tab.tile_mode_requested.connect(self.enter_history_tile_mode)
+        self._history_tab.draft_tile_mode_requested.connect(self.enter_draft_history_tile_mode)
         self._history_tab.history_map_requested.connect(self.history_map_requested.emit)
-        self._history_tab.history_reconnect_requested.connect(self.history_reconnect_requested.emit)
+        self._history_tab.draft_history_map_requested.connect(self.draft_history_map_requested.emit)
         self._history_tile_clone.exit_requested.connect(self.exit_history_tile_mode)
         # ゴミ箱タブと履歴タブを連動させる
         self._history_tab._tree.tree_changed.connect(self._trash_tab.refresh)
@@ -2909,6 +3220,7 @@ class SidePanel(QWidget):
         if self._history_tile_mode:
             self._history_tile_new_count += 1
             self._history_tile_clone.set_new_count(self._history_tile_new_count)
+            return
         self._history_tab.refresh()
 
     def refresh_history_items(self, gen_ids: list[int]) -> None:
@@ -2917,9 +3229,18 @@ class SidePanel(QWidget):
     def focus_history_generation(self, gen_id: int, *, animate: bool = True, flash: bool = True) -> bool:
         if self._history_tile_mode:
             self.exit_history_tile_mode()
+            self._refresh_history_after_tile_exit()
         self._stack.setCurrentWidget(self._tabs)
         self._tabs.setCurrentWidget(self._history_tab)
         return self._history_tab.focus_generation(gen_id, animate=animate, flash=flash)
+
+    def focus_history_draft(self, owner_history_db: str, draft_id: int, *, animate: bool = True, flash: bool = True) -> bool:
+        if self._history_tile_mode:
+            self.exit_history_tile_mode()
+            self._refresh_history_after_tile_exit()
+        self._stack.setCurrentWidget(self._tabs)
+        self._tabs.setCurrentWidget(self._history_tab)
+        return self._history_tab.focus_draft(owner_history_db, draft_id, animate=animate, flash=flash)
 
     def refresh_for_nsfw_setting(self) -> None:
         self._history_tab.refresh()
@@ -2943,10 +3264,39 @@ class SidePanel(QWidget):
         )
         _app_db.execute(
             "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
+            ("history_tile_kind", "generation"),
+        )
+        _app_db.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
             ("history_tile_gen_id", str(int(generation_id))),
         )
         self.history_tile_mode_changed.emit(True)
         self.history_tile_generation_changed.emit(int(generation_id))
+
+    def enter_draft_history_tile_mode(self, owner_history_db: str, draft_id: int) -> None:
+        if not self._history_tile_clone.load_draft(str(owner_history_db), int(draft_id)):
+            QMessageBox.warning(
+                self,
+                tr("side_panel.history_tile_target_removed_title"),
+                tr("side_panel.history_tile_target_removed"),
+            )
+            return
+        self._history_tile_mode = True
+        self._history_tile_new_count = 0
+        self._history_tile_clone.set_new_count(0)
+        self._stack.setCurrentWidget(self._history_tile_clone)
+        for key, value in (
+            ("history_tile_mode_on", "1"),
+            ("history_tile_kind", "draft"),
+            ("history_tile_draft_owner", str(owner_history_db)),
+            ("history_tile_draft_id", str(int(draft_id))),
+        ):
+            _app_db.execute(
+                "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
+                (key, value),
+            )
+        self.history_tile_mode_changed.emit(True)
+        self.history_tile_generation_changed.emit(("draft", str(owner_history_db), int(draft_id)))
 
     def exit_history_tile_mode(self) -> None:
         self._history_tile_mode = False
@@ -2957,12 +3307,35 @@ class SidePanel(QWidget):
             "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
             ("history_tile_mode_on", "0"),
         )
-        self._history_tab.refresh()
+        _app_db.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
+            ("history_tile_kind", ""),
+        )
         self.history_tile_mode_changed.emit(False)
         self.history_tile_generation_changed.emit(None)
+        self._schedule_history_refresh_after_tile_exit()
+
+    def _schedule_history_refresh_after_tile_exit(self) -> None:
+        if self._history_tile_exit_refresh_pending:
+            return
+        self._history_tile_exit_refresh_pending = True
+        QTimer.singleShot(50, self._refresh_history_after_tile_exit)
+
+    def _refresh_history_after_tile_exit(self) -> None:
+        if not self._history_tile_exit_refresh_pending:
+            return
+        self._history_tile_exit_refresh_pending = False
+        self._history_tab.refresh()
 
     def _restore_history_tile_mode(self) -> None:
         if _read_setting("history_tile_mode_on", "0") != "1":
+            return
+        kind = _read_setting("history_tile_kind", "generation")
+        if kind == "draft":
+            owner = _read_setting("history_tile_draft_owner", "")
+            raw_draft = _read_setting("history_tile_draft_id", "0")
+            if owner and raw_draft.isdigit() and int(raw_draft) > 0:
+                self.enter_draft_history_tile_mode(owner, int(raw_draft))
             return
         raw = _read_setting("history_tile_gen_id", "0")
         if not raw.isdigit() or int(raw) <= 0:
