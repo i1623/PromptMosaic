@@ -3292,7 +3292,9 @@ class MainWindow(QMainWindow):
         self._lora_browser.refresh()
         self._populate_base_plan_combo()
         self._populate_model_combo()
+        self._refresh_current_template_selection()
         self._apply_model_mode_ui()
+        self._apply_negative_prompt_ui()
         self._update_generation_buttons()
         viewer = self._open_image_viewer()
         key = getattr(viewer, "_node_key", None) if viewer is not None else None
@@ -3300,6 +3302,26 @@ class MainWindow(QMainWindow):
             self._show_history_map_node_preview(
                 key[0], int(key[1]), activate_viewer=False, set_focus=False,
             )
+
+    def _refresh_current_template_selection(self) -> None:
+        """Keep the active generation template valid after Invoke setup changes."""
+        base = self._current_base
+        current_id = self._current_template_id
+        if current_id is not None:
+            row = _env_db.fetchone(
+                "SELECT id, name, base FROM templates WHERE id=?",
+                (current_id,),
+            )
+            if row and (not base or row["base"] == base):
+                self._current_template_id = row["id"]
+                self._current_template_name = row["name"]
+                return
+
+        if base:
+            self._select_default_template_for_base(base)
+        else:
+            self._current_template_id = None
+            self._current_template_name = ""
 
     def _on_invoke_setup_language_changed(self) -> None:
         self._apply_runtime_settings()
