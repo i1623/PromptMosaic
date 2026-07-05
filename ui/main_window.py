@@ -1638,6 +1638,8 @@ class MainWindow(QMainWindow):
         self._show_status(tr("main.board_load_fail", error=msg), error=True)
 
     def _on_boards_worker_finished(self) -> None:
+        if self._board_worker is not None:
+            self._board_worker.deleteLater()
         self._board_worker = None
 
     def _apply_board_list(self, boards: list[dict]) -> None:
@@ -3603,6 +3605,10 @@ class MainWindow(QMainWindow):
         """接続確認をバックグラウンドワーカーに委譲する（UI をブロックしない）。"""
         if self._conn_worker and self._conn_worker.isRunning():
             return  # 前の確認がまだ実行中 → スキップ
+        if self._conn_worker is not None:
+            # 終了済みの旧ワーカーは親(self)にぶら下がったまま残るため、
+            # 30秒毎の再生成で蓄積しないよう明示的に破棄する
+            self._conn_worker.deleteLater()
         self._conn_worker = _ConnCheckWorker(self._client, parent=self)
         self._conn_worker.conn_ok.connect(self._on_conn_ok)
         self._conn_worker.conn_ng.connect(self._on_conn_ng)
@@ -3630,6 +3636,10 @@ class MainWindow(QMainWindow):
         self._check_external_inbox()
         if self._hist_worker and self._hist_worker.isRunning():
             return
+        if self._hist_worker is not None:
+            # 終了済みの旧ワーカーは親(self)にぶら下がったまま残るため、
+            # ポーリング毎の再生成で蓄積しないよう明示的に破棄する
+            self._hist_worker.deleteLater()
         from db.connections import get_active_history_name
         self._hist_worker = _HistorySyncWorker(
             self._client, get_active_history_name(), parent=self,

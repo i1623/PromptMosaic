@@ -831,7 +831,7 @@ class BlockWidget(QFrame):
             window = self.window()
             handler = getattr(window, "_on_png_dropped", None)
             if callable(handler):
-                QTimer.singleShot(0, lambda p=path: handler(p))
+                QTimer.singleShot(0, lambda p=path, h=handler: h(p))
             return True
 
         return False

@@ -4,7 +4,11 @@
 
 [Japanese](README.md) | [English](README_EN.md)
 
-## Latest Update: v1.5.1
+## Latest Update: v1.5.2
+
+- Fixed a model-specific generation crash caused by an uninitialized variable.
+- Fixed duplicated generation templates being misidentified on first use, which could invalidate the template cache.
+- Fixed LoRA validation for templates with nonstandard wiring names, and cleaned up finished connection, history sync, and board-list workers so long sessions do not accumulate old QThread objects.
 
 - If you use Anima with Invoke 6.13.5.rc1, run an Anima generation once in Invoke, then refetch the Anima generation template from PromptMosaic's Invoke Data Acquisition dialog because the Anima workflow structure changed.
 - Fixed an issue where, after refetching generation templates for Invoke 6.13.5.rc1, the main window could keep a deleted old template ID and fail to generate.
@@ -50,7 +54,7 @@ It is intended to run next to Invoke: keep Invoke open beside it, then use Promp
 - **11 languages** - Japanese, English, Chinese (Simplified / Traditional), Korean, German, French, Spanish, Italian, Portuguese (Brazil), and Russian.
 - **Simple data backup** - back up PromptMosaic by copying the entire `data` folder.
 
-> **Version:** 1.5.0
+> **Version:** 1.5.2
 > **Target Invoke:** 6.13 or later
 > **Supported OS:** Windows 11 (PySide6 / Python 3.11 recommended)
 

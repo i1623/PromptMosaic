@@ -687,6 +687,7 @@ class InvokeClient:
         actual_seed = seed if seed is not None else 0
         model_hash = None
         model_base = None
+        model_name = None
         if model_key:
             row = _env_db.fetchone(
                 "SELECT invoke_hash, base, name FROM models WHERE invoke_key=?",
@@ -1012,11 +1013,14 @@ class InvokeClient:
             return False
         if not selector_ids:
             return False
+        # _replace_lora_selectors はテンプレの実配線（出力フィールド名・
+        # 接続先 "item"/"collection"）を踏襲するため、ここも同じ条件で検証する。
+        # source.field を "lora" に決め打ちすると、配線名が異なるテンプレで
+        # 注入成功にもかかわらず検証が偽になり LoRA が黙って外されてしまう。
         for sid in selector_ids:
             if not any(
                 edge.get("source", {}).get("node_id") == sid
-                and edge.get("source", {}).get("field") == "lora"
-                and edge.get("destination", {}).get("field") == "item"
+                and edge.get("destination", {}).get("field") in ("item", "collection")
                 for edge in edges
             ):
                 return False
@@ -1305,6 +1309,9 @@ class InvokeClient:
         """
         import re as _re
         core = cache_key
+        # テンプレ複製時のサフィックス _copy2, _copy3 …（入れ子含む）を取り除く
+        # （settings_dialog の複製が {cache_key}_copy{n} 形式のキーを生成する）
+        core = _re.sub(r"(_copy[0-9]+)+$", "", core)
         # 複数テンプレ用の連番サフィックス _v2, _v3 … を取り除く
         core = _re.sub(r"_v[0-9]+$", "", core)
         if core.startswith("flux2"):
