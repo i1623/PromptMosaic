@@ -6,6 +6,7 @@
 
 ## Latest Update: v1.5.2
 
+- Important: When using PromptMosaic with InvokeAI 6.13.7 or later, please run InvokeAI in single-user mode. Multi-user mode is not currently supported.
 - Fixed a model-specific generation crash caused by an uninitialized variable.
 - Fixed duplicated generation templates being misidentified on first use, which could invalidate the template cache.
 - Fixed LoRA validation for templates with nonstandard wiring names, and cleaned up finished connection, history sync, and board-list workers so long sessions do not accumulate old QThread objects.
