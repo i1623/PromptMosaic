@@ -271,6 +271,8 @@ class GroupTile:
     lora_source_key: str = field(default="", init=False, repr=False)
     # UI の展開/折りたたみ状態（_refresh_tiles 再構築後も復元するために保持）
     ui_expanded: bool = field(default=False, init=False, repr=False)
+    # ユーザーが右端ドラッグで指定した横幅。0 は従来どおりの自動幅。
+    ui_width: int = field(default=0, init=False, repr=False)
     # シーケンシャルインデックス（実行時のみ、シリアライズ対象外）
     _seq_idx: int = field(default=0, init=False, repr=False)
     # 直前の compile() で選択したタイルの self.tiles 内インデックス
@@ -363,6 +365,20 @@ class GroupTile:
             if isinstance(t, GroupTile):
                 t.reset_seq()
 
+    def enable_direct_tiles(self) -> bool:
+        """直下の通常タイルだけを ON にし、変更があれば True を返す。
+
+        入れ子の GroupTile 自身と、その配下は意図的に変更しない。
+        """
+        changed = False
+        for tile in self.tiles:
+            if isinstance(tile, GroupTile):
+                continue
+            if not getattr(tile, "enabled", True):
+                tile.enabled = True
+                changed = True
+        return changed
+
     def to_dict(self, *, include_ui_state: bool = True) -> dict:
         data = {
             "tile_type":       "group",
@@ -377,6 +393,8 @@ class GroupTile:
             "strength_level":  self.strength_level,
             "edit_locked":     self.edit_locked,
             "lora_source_key": self.lora_source_key,
+            # 横幅は折りたたみ状態と違い、グループ固有の表示設定として常に保存する。
+            "ui_width":        self.ui_width,
         }
         if include_ui_state:
             data["ui_expanded"] = self.ui_expanded
@@ -400,6 +418,10 @@ class GroupTile:
         )
         gt.lora_source_key = d.get("lora_source_key", "")
         gt.ui_expanded     = bool(d.get("ui_expanded", False)) if restore_ui_state else False
+        try:
+            gt.ui_width = max(0, min(4096, int(d.get("ui_width", 0))))
+        except (TypeError, ValueError):
+            gt.ui_width = 0
         for td in d.get("tiles", []):
             tt = td.get("tile_type", TileType.TAG.value)
             if tt == "group":

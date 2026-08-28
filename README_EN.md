@@ -4,8 +4,12 @@
 
 [Japanese](README.md) | [English](README_EN.md)
 
-## Latest Update: v1.5.2
+## Latest Update: v1.5.3
 
+- Added per-image PromptMosaic package export from each history image in the right pane. Packages preserve group structure, ON/OFF states, saved group widths, and generation settings. Import is available beside the positive-prompt copy button.
+- Added a button that turns on direct items in a group while leaving nested groups and their ON/OFF states unchanged.
+- Added drag resizing for group width, persistent saved widths, and adaptive vertical sizing based on the resulting wrapped rows.
+- Fixed the negative prompt section not appearing for templates such as Anima that support negative prompts.
 - Important: When using PromptMosaic with InvokeAI 6.13.7 or later, please run InvokeAI in single-user mode. Multi-user mode is not currently supported.
 - Fixed a model-specific generation crash caused by an uninitialized variable.
 - Fixed duplicated generation templates being misidentified on first use, which could invalidate the template cache.
@@ -55,7 +59,7 @@ It is intended to run next to Invoke: keep Invoke open beside it, then use Promp
 - **11 languages** - Japanese, English, Chinese (Simplified / Traditional), Korean, German, French, Spanish, Italian, Portuguese (Brazil), and Russian.
 - **Simple data backup** - back up PromptMosaic by copying the entire `data` folder.
 
-> **Version:** 1.5.2
+> **Version:** 1.5.3
 > **Target Invoke:** 6.13 or later
 > **Supported OS:** Windows 11 (PySide6 / Python 3.11 recommended)
 

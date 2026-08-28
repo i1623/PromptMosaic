@@ -59,6 +59,10 @@ import db.library_db as _library_db
 import core.local_storage as local_storage
 from api.lm_client import LMClient, LMStudioError, translation_fallback_from_thinking
 from core.text_sanitize import single_line_text
+from core.prompt_pack import (
+    PACK_SUFFIX, PromptPackError, portable_document, read_prompt_pack, write_prompt_pack,
+)
+from core.version import APP_VERSION
 
 # ベース別スケジューラーリスト（フォールバック用ハードコード、Invoke OpenAPI仕様に基づく）
 # 接続時に fetch_scheduler_map() で上書きされる
@@ -1121,6 +1125,7 @@ class MainWindow(QMainWindow):
         self._btn_clear_all.clicked.connect(self._all_clear)
         tb.addWidget(self._btn_clear_all)
 
+        # ── 1画像単位の PromptMosaic 形式 ─────────────────
         # ── 設定（アイコンのみ） ───────────────────────────
         self._btn_settings = self._square_btn("⚙", tr("main.btn_settings_tooltip"))
         self._btn_settings.clicked.connect(self._open_settings)
@@ -1945,6 +1950,7 @@ class MainWindow(QMainWindow):
         self._editor.translate_requested.connect(self._on_translate_requested)
         self._editor.translate_cancelled.connect(self._on_translate_cancel)
         self._editor.history_map_requested.connect(self._open_history_map)
+        self._editor.prompt_pack_import_requested.connect(self._import_prompt_pack)
         self._editor.history_stack_requested.connect(
             self._jump_to_history_stack
         )
@@ -2002,6 +2008,7 @@ class MainWindow(QMainWindow):
         self._side_panel.history_tile_generation_changed.connect(self._on_history_tile_generation_changed)
         self._side_panel.history_map_requested.connect(self._open_history_map)
         self._side_panel.draft_history_map_requested.connect(self._open_draft_history_map)
+        self._side_panel.prompt_pack_export_requested.connect(self._export_prompt_pack)
         self._side_panel.history_changed.connect(self._on_history_rows_changed)
         self._splitter.addWidget(self._side_panel)
 
@@ -3174,6 +3181,294 @@ class MainWindow(QMainWindow):
         self._detach_current_editor_history_lineage()
 
     # ── 設定ダイアログ ───────────────────────────────────
+
+    @staticmethod
+    def _portable_prompt_pack_loras(values: list) -> list[dict]:
+        portable_loras: list[dict] = []
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("invoke_key") or "")
+            row = _env_db.fetchone(
+                "SELECT name, base, invoke_hash FROM models WHERE invoke_key=? AND type='lora'",
+                (key,),
+            ) if key else None
+            portable_loras.append({
+                "name": (row["name"] if row else item.get("name")) or "",
+                "base": (row["base"] if row else item.get("base")) or "",
+                "hash": (row["invoke_hash"] if row else item.get("hash")) or "",
+                "weight": float(item.get("weight", 0.75)),
+                "enabled": bool(item.get("enabled", True)),
+            })
+        return portable_loras
+
+    def _prompt_pack_payload_for_generation(self, generation_id: int) -> dict:
+        row = _history_db.fetchone(
+            "SELECT sent_positive_prompt, sent_negative_prompt, structured_prompt, "
+            "       loras_json, invoke_key, model_name, model_base, model_hash, seed, "
+            "       steps, cfg_scale, scheduler, width, height, template_id "
+            "FROM generations WHERE id=? AND trashed_at IS NULL",
+            (generation_id,),
+        )
+        if not row:
+            raise PromptPackError(tr("pack.export_missing_history", id=generation_id))
+
+        doc = PromptDocument.load_from_db(generation_id)
+        if doc is None and row["structured_prompt"]:
+            try:
+                doc = PromptDocument.from_json(str(row["structured_prompt"]))
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                doc = None
+        if doc is None:
+            # 構造化保存より前の履歴でも、画像に送信した文字列自体は渡せるようにする。
+            doc = PromptDocument()
+            positive = str(row["sent_positive_prompt"] or "").strip()
+            negative = str(row["sent_negative_prompt"] or "").strip()
+            if positive:
+                doc.positive.middle.tiles = [NaturalTextTile(text=positive)]
+            if negative:
+                doc.negative.middle.tiles = [NaturalTextTile(text=negative)]
+
+        model = {
+            "name": str(row["model_name"] or ""),
+            "base": str(row["model_base"] or ""),
+            "hash": str(row["model_hash"] or ""),
+        }
+        model_key = str(row["invoke_key"] or "")
+        if model_key:
+            model_row = _env_db.fetchone(
+                "SELECT name, base, invoke_hash FROM models WHERE invoke_key=?",
+                (model_key,),
+            )
+            if model_row:
+                model = {
+                    "name": str(model_row["name"] or model["name"]),
+                    "base": str(model_row["base"] or model["base"]),
+                    "hash": str(model_row["invoke_hash"] or model["hash"]),
+                }
+
+        loras: list = []
+        if row["loras_json"]:
+            try:
+                decoded = json.loads(str(row["loras_json"]))
+                if isinstance(decoded, list):
+                    loras = decoded
+            except (TypeError, ValueError, json.JSONDecodeError):
+                pass
+
+        template_name = ""
+        if row["template_id"] is not None:
+            template_row = _env_db.fetchone(
+                "SELECT name FROM templates WHERE id=?",
+                (row["template_id"],),
+            )
+            if template_row:
+                template_name = str(template_row["name"] or "")
+
+        memo_row = _history_db.fetchone(
+            "SELECT review_text FROM image_reviews WHERE generation_id=?",
+            (generation_id,),
+        )
+
+        return {
+            "unit": "single_image",
+            "document": portable_document(doc.to_dict()),
+            "memo": str((memo_row["review_text"] if memo_row else "") or ""),
+            "generation": {
+                "model": model,
+                "template_name": template_name,
+                "loras": self._portable_prompt_pack_loras(loras),
+                "seed": int(row["seed"]) if row["seed"] is not None else -1,
+                "seed_fixed": False,
+                "steps": int(row["steps"]) if row["steps"] is not None else 0,
+                "cfg_scale": float(row["cfg_scale"]) if row["cfg_scale"] is not None else 0.0,
+                "scheduler": str(row["scheduler"] or ""),
+                "width": int(row["width"]) if row["width"] is not None else 0,
+                "height": int(row["height"]) if row["height"] is not None else 0,
+            },
+        }
+
+    def _export_prompt_pack(self, generation_id: int) -> None:
+        try:
+            payload = self._prompt_pack_payload_for_generation(int(generation_id))
+        except (PromptPackError, KeyError, TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                tr("pack.export_error_title"),
+                tr("pack.export_error", msg=str(exc)),
+            )
+            return
+        last_dir = _get_setting("prompt_pack_dir", "")
+        filename = (
+            f"PromptMosaic_image_{int(generation_id)}_"
+            + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            + PACK_SUFFIX
+        )
+        initial = str(Path(last_dir) / filename) if last_dir else filename
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            tr("pack.export_dialog_title"),
+            initial,
+            tr("pack.file_filter"),
+        )
+        if not path:
+            return
+        try:
+            saved = write_prompt_pack(path, payload, app_version=APP_VERSION)
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                tr("pack.export_error_title"),
+                tr("pack.export_error", msg=str(exc)),
+            )
+            return
+        _set_setting("prompt_pack_dir", str(saved.parent))
+        self._show_status(tr("pack.export_success", name=saved.name))
+
+    @staticmethod
+    def _prompt_pack_counts(doc: PromptDocument) -> tuple[int, int]:
+        groups = 0
+        elements = 0
+
+        def _walk(tiles: list) -> None:
+            nonlocal groups, elements
+            for tile in tiles:
+                if isinstance(tile, GroupTile):
+                    groups += 1
+                    _walk(tile.tiles)
+                else:
+                    elements += 1
+
+        for side in (doc.positive, doc.negative):
+            for block in (side.top, side.middle, side.bottom):
+                _walk(block.tiles)
+        return groups, elements
+
+    def _resolve_prompt_pack_loras(self, values: list) -> tuple[list[dict], int]:
+        resolved: list[dict] = []
+        skipped = 0
+        for value in values:
+            if not isinstance(value, dict):
+                skipped += 1
+                continue
+            name = str(value.get("name") or "").strip()
+            base = str(value.get("base") or "").strip()
+            hash_value = str(value.get("hash") or "").strip()
+            row = _env_db.fetchone(
+                "SELECT invoke_key, name, base FROM models "
+                "WHERE type='lora' AND available=1 "
+                "AND ((?!='' AND invoke_hash=?) OR (name=? AND (?='' OR base=?))) "
+                "ORDER BY CASE WHEN ?!='' AND invoke_hash=? THEN 0 ELSE 1 END LIMIT 1",
+                (hash_value, hash_value, name, base, base, hash_value, hash_value),
+            )
+            if not row:
+                skipped += 1
+                continue
+            try:
+                weight = max(-4.0, min(4.0, float(value.get("weight", 0.75))))
+            except (TypeError, ValueError):
+                weight = 0.75
+            resolved.append({
+                "invoke_key": row["invoke_key"],
+                "name": row["name"] or name,
+                "base": row["base"] or base,
+                "weight": weight,
+                "enabled": bool(value.get("enabled", True)),
+            })
+        return resolved, skipped
+
+    def _apply_prompt_pack_generation(self, generation: dict) -> tuple[bool, int]:
+        if not isinstance(generation, dict):
+            return False, 0
+        model = generation.get("model") if isinstance(generation.get("model"), dict) else {}
+        model_applied = self._apply_invoke_meta_model(
+            str(model.get("name") or ""),
+            str(model.get("base") or ""),
+            model_hash=str(model.get("hash") or ""),
+        )
+
+        template_name = str(generation.get("template_name") or "").strip()
+        if model_applied and template_name:
+            trow = _env_db.fetchone(
+                "SELECT id, name FROM templates WHERE base=? AND name=? LIMIT 1",
+                (self._current_base, template_name),
+            )
+            if trow:
+                self._current_template_id = trow["id"]
+                self._current_template_name = trow["name"]
+                self._apply_negative_prompt_ui()
+
+        loras, skipped = self._resolve_prompt_pack_loras(generation.get("loras") or [])
+        self._lora_bar.set_loras(loras)
+        self._lora_browser.set_selected_keys(self._lora_bar.get_selected_keys())
+
+        try:
+            seed = int(generation.get("seed", -1))
+            self._seed_random_cb.setChecked(seed < 0)
+            if seed >= 0:
+                self._seed_spin.setValue(max(0, min(2_147_483_647, seed)))
+        except (TypeError, ValueError):
+            pass
+        self._seed_fixed_btn.setChecked(bool(generation.get("seed_fixed", False)))
+        try:
+            self._steps_spin.setValue(int(generation.get("steps", self._steps_spin.value())))
+            self._cfg_spin.setValue(float(generation.get("cfg_scale", self._cfg_spin.value())))
+            self._width_spin.setValue(int(generation.get("width", self._width_spin.value())))
+            self._height_spin.setValue(int(generation.get("height", self._height_spin.value())))
+        except (TypeError, ValueError):
+            pass
+        scheduler = str(generation.get("scheduler") or "")
+        idx = self._sched_combo.findText(scheduler)
+        if idx >= 0:
+            self._sched_combo.setCurrentIndex(idx)
+        return model_applied, skipped
+
+    def _import_prompt_pack(self) -> None:
+        last_dir = _get_setting("prompt_pack_dir", "")
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            tr("pack.import_dialog_title"),
+            last_dir,
+            tr("pack.file_filter"),
+        )
+        if not path:
+            return
+        try:
+            payload = read_prompt_pack(path)
+            doc = PromptDocument.from_dict(payload["document"])
+            groups, elements = self._prompt_pack_counts(doc)
+        except (PromptPackError, KeyError, TypeError, ValueError) as exc:
+            QMessageBox.warning(
+                self,
+                tr("pack.import_error_title"),
+                tr("pack.import_error", msg=str(exc)),
+            )
+            return
+
+        reply = QMessageBox.question(
+            self,
+            tr("pack.import_confirm_title"),
+            tr("pack.import_confirm_msg", groups=groups, elements=elements),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self._editor.set_document(doc)
+        self._editor.set_memo(str(payload.get("memo") or ""))
+        _model_applied, skipped = self._apply_prompt_pack_generation(payload.get("generation") or {})
+        if self._lora_bar.get_loras():
+            self._relink_lora_trigger_words(self._lora_bar.get_loras())
+            self._editor.refresh_tiles_from_document()
+        self._detach_current_editor_history_lineage()
+        self._editor_dirty = True
+        self._update_generation_buttons()
+        _set_setting("prompt_pack_dir", str(Path(path).parent))
+        if skipped:
+            self._show_status(tr("pack.import_success_skipped", count=skipped))
+        else:
+            self._show_status(tr("pack.import_success"))
 
     def _open_settings(self) -> None:
         """設定ダイアログを開く"""
@@ -6210,10 +6505,20 @@ class MainWindow(QMainWindow):
         row = _env_db.fetchone(
             "SELECT invoke_key, name, base FROM models "
             "WHERE type='main' AND available=1 "
-            "  AND (name=? OR invoke_key=? OR invoke_hash=? OR invoke_key=? OR invoke_hash=?) "
-            "ORDER BY CASE WHEN invoke_key=? THEN 0 WHEN invoke_hash=? THEN 1 WHEN name=? THEN 2 ELSE 3 END "
+            "  AND ((?!='' AND invoke_key=?) OR (?!='' AND invoke_hash=?) "
+            "       OR (?!='' AND (name=? OR invoke_key=? OR invoke_hash=?))) "
+            "ORDER BY CASE WHEN ?!='' AND invoke_key=? THEN 0 "
+            "              WHEN ?!='' AND invoke_hash=? THEN 1 "
+            "              WHEN ?!='' AND name=? THEN 2 ELSE 3 END "
             "LIMIT 1",
-            (model_name, model_name, model_name, model_key, model_hash, model_key, model_hash, model_name),
+            (
+                model_key, model_key,
+                model_hash, model_hash,
+                model_name, model_name, model_name, model_name,
+                model_key, model_key,
+                model_hash, model_hash,
+                model_name, model_name,
+            ),
         )
         if not row:
             return False

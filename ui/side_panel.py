@@ -140,7 +140,7 @@ class _GenerationItemDelegate(QStyledItemDelegate):
         top = rect.top() + max(4, (rect.height() - max(icon_size, text_h)) // 2)
         tile_cell_w = 28
         tile_btn_size = 24
-        btn_stack_h = tile_btn_size * 2 + 6
+        btn_stack_h = tile_btn_size * 3 + 12
         btn_top = rect.top() + max(2, (rect.height() - btn_stack_h) // 2)
         tile_btn = QRect(
             rect.left() + max(0, (tile_cell_w - tile_btn_size) // 2),
@@ -149,6 +149,7 @@ class _GenerationItemDelegate(QStyledItemDelegate):
             tile_btn_size,
         )
         map_btn = QRect(tile_btn.left(), tile_btn.bottom() + 6, tile_btn_size, tile_btn_size)
+        export_btn = QRect(map_btn.left(), map_btn.bottom() + 6, tile_btn_size, tile_btn_size)
         thumb = QRect(rect.left() + tile_cell_w + 2, top, icon_size, icon_size)
         text_left = thumb.right() + 10
         text_width = max(20, rect.right() - text_left - 4)
@@ -160,6 +161,7 @@ class _GenerationItemDelegate(QStyledItemDelegate):
         return {
             "tile_btn": tile_btn,
             "map_btn": map_btn,
+            "export_btn": export_btn,
             "thumb": thumb,
             "lines": lines,
             "title": lines[3],
@@ -255,6 +257,17 @@ class _GenerationItemDelegate(QStyledItemDelegate):
                 else "🗺️"
             ),
         )
+
+        if not is_draft:
+            export_btn_rect: QRect = layout["export_btn"]  # type: ignore[assignment]
+            painter.setPen(QColor(ACCENT if selected else SUBTEXT))
+            painter.setBrush(QColor(SURFACE0 if selected else SURFACE1))
+            painter.drawRoundedRect(export_btn_rect, 4, 4)
+            painter.drawText(
+                export_btn_rect,
+                Qt.AlignmentFlag.AlignCenter,
+                "📤",
+            )
 
         gen_no = str(index.data(_ROLE_GEN_NO) or "")
         created = str(index.data(_ROLE_CREATED) or "")
@@ -428,6 +441,7 @@ class GenerationTreeWidget(QTreeWidget):
     draft_tile_mode_requested = Signal(str, int)
     history_map_requested = Signal(int)
     draft_history_map_requested = Signal(str, int)
+    prompt_pack_export_requested = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -537,6 +551,13 @@ class GenerationTreeWidget(QTreeWidget):
                         self.history_map_requested.emit(int(gen_id))
                     event.accept()
                     return
+                if self._prompt_pack_export_at_pos(item, event.pos()):
+                    self._suppress_drag = True
+                    gen_id = item.data(0, _ROLE_ID)
+                    if gen_id is not None:
+                        self.prompt_pack_export_requested.emit(int(gen_id))
+                    event.accept()
+                    return
                 if self._title_at_pos(item, event.pos()):
                     self._suppress_drag = True
                     self.setCurrentItem(item)
@@ -627,6 +648,13 @@ class GenerationTreeWidget(QTreeWidget):
             return False
         map_btn: QRect = layout["map_btn"]  # type: ignore[assignment]
         return map_btn.adjusted(-3, -3, 3, 3).contains(pos)
+
+    def _prompt_pack_export_at_pos(self, item: QTreeWidgetItem, pos: QPoint) -> bool:
+        layout = self._generation_item_layout(item)
+        if layout is None:
+            return False
+        export_btn: QRect = layout["export_btn"]  # type: ignore[assignment]
+        return export_btn.adjusted(-3, -3, 3, 3).contains(pos)
 
     def _folder_hit_at_pos(self, item: QTreeWidgetItem, pos: QPoint) -> bool:
         rect = self.visualItemRect(item)
@@ -1315,6 +1343,7 @@ class HistoryTab(QWidget):
     draft_tile_mode_requested = Signal(str, int)
     history_map_requested = Signal(int)
     draft_history_map_requested = Signal(str, int)
+    prompt_pack_export_requested = Signal(int)
 
     def __init__(self, client: "InvokeClient | None" = None, parent=None):
         super().__init__(parent)
@@ -1403,6 +1432,7 @@ class HistoryTab(QWidget):
         self._tree.draft_tile_mode_requested.connect(self.draft_tile_mode_requested.emit)
         self._tree.history_map_requested.connect(self.history_map_requested.emit)
         self._tree.draft_history_map_requested.connect(self.draft_history_map_requested.emit)
+        self._tree.prompt_pack_export_requested.connect(self.prompt_pack_export_requested.emit)
         self._tree.group_focused.connect(self._on_group_focused)
         self._tree.tree_changed.connect(self.refresh)
         self._tree.rating_changed.connect(self._on_generation_rating_changed)
@@ -3136,6 +3166,7 @@ class SidePanel(QWidget):
     history_tile_generation_changed = Signal(object)  # int | ("draft", owner, id) | None
     history_map_requested          = Signal(int)
     draft_history_map_requested    = Signal(str, int)
+    prompt_pack_export_requested   = Signal(int)
     history_changed                = Signal()  # 履歴行の増減/ゴミ箱出入り（マップ等の追従用）
 
     def __init__(self, client: "InvokeClient | None" = None, parent=None):
@@ -3168,6 +3199,7 @@ class SidePanel(QWidget):
         self._history_tab.draft_tile_mode_requested.connect(self.enter_draft_history_tile_mode)
         self._history_tab.history_map_requested.connect(self.history_map_requested.emit)
         self._history_tab.draft_history_map_requested.connect(self.draft_history_map_requested.emit)
+        self._history_tab.prompt_pack_export_requested.connect(self.prompt_pack_export_requested.emit)
         self._history_tile_clone.exit_requested.connect(self.exit_history_tile_mode)
         # ゴミ箱タブと履歴タブを連動させる
         self._history_tab._tree.tree_changed.connect(self._trash_tab.refresh)

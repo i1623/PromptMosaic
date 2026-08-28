@@ -1163,5 +1163,22 @@
   "model_browser.sync_done_title": "同步完成",
   "model_browser.sync_done_msg": "與 Invoke 的同步已完成。",
   "main.tile_display_cycle_tooltip": "循環切換磁貼顯示：兩行（本地語言+提示詞）→ 僅本地語言 → 僅提示詞。按鈕顯示目前狀態",
-  "settings.tile_display_en": "單行顯示（僅提示詞）"
+  "settings.tile_display_en": "單行顯示（僅提示詞）",
+  "group.all_on_tooltip": "Turn on all direct items in this group (nested groups are unchanged)",
+  "group.resize_tooltip": "Drag horizontally to resize the group; double-click to restore automatic width",
+  "pack.export_tooltip": "Export this history image's data as a PromptMosaic package",
+  "pack.import_tooltip": "Import one PromptMosaic image prompt package",
+  "pack.export_dialog_title": "Export PromptMosaic package",
+  "pack.import_dialog_title": "Import PromptMosaic package",
+  "pack.file_filter": "PromptMosaic package (*.promptmosaic-pack)",
+  "pack.export_success": "PromptMosaic package saved: {name}",
+  "pack.export_error_title": "Export failed",
+  "pack.export_error": "The PromptMosaic package could not be saved.\\n{msg}",
+  "pack.export_missing_history": "History image #{id} was not found.",
+  "pack.import_error_title": "Import failed",
+  "pack.import_error": "The PromptMosaic package could not be loaded.\\n{msg}",
+  "pack.import_confirm_title": "Import PromptMosaic package",
+  "pack.import_confirm_msg": "Groups: {groups}\\nItems: {elements}\\n\\nReplace the current editor contents with this data?",
+  "pack.import_success": "PromptMosaic package imported",
+  "pack.import_success_skipped": "PromptMosaic package imported ({count} unavailable LoRA entries were skipped)"
 }

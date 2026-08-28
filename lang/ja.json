@@ -1219,5 +1219,22 @@
   "model_browser.sync_done_title": "同期完了",
   "model_browser.sync_done_msg": "Invoke との同期が完了しました。",
   "main.tile_display_cycle_tooltip": "タイル表示を巡回切替: 2段（現地語+プロンプト）→ 現地語1段 → プロンプト1段。ボタンは現在の表示状態を示します",
-  "settings.tile_display_en": "1段表示（プロンプトのみ）"
+  "settings.tile_display_en": "1段表示（プロンプトのみ）",
+  "group.all_on_tooltip": "このグループ直下の要素をすべてON（入れ子グループは変更しません）",
+  "group.resize_tooltip": "左右ドラッグでグループ幅を変更／ダブルクリックで自動幅に戻す",
+  "pack.export_tooltip": "この履歴画像のデータをPromptMosaic形式でエクスポート",
+  "pack.import_tooltip": "PromptMosaic形式の1画像データをインポート",
+  "pack.export_dialog_title": "PromptMosaic形式でエクスポート",
+  "pack.import_dialog_title": "PromptMosaic形式をインポート",
+  "pack.file_filter": "PromptMosaic形式 (*.promptmosaic-pack)",
+  "pack.export_success": "PromptMosaic形式を保存しました: {name}",
+  "pack.export_error_title": "エクスポート失敗",
+  "pack.export_error": "PromptMosaic形式を保存できませんでした。\n{msg}",
+  "pack.export_missing_history": "履歴画像 #{id} が見つかりません。",
+  "pack.import_error_title": "インポート失敗",
+  "pack.import_error": "PromptMosaic形式を読み込めませんでした。\n{msg}",
+  "pack.import_confirm_title": "PromptMosaic形式を読み込み",
+  "pack.import_confirm_msg": "グループ: {groups}個\n要素: {elements}個\n\n現在の編集内容をこのデータで置き換えますか？",
+  "pack.import_success": "PromptMosaic形式を読み込みました",
+  "pack.import_success_skipped": "PromptMosaic形式を読み込みました（この環境にないLoRA {count}件は除外）"
 }

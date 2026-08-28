@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QDialog, QComboBox, QLineEdit, QDialogButtonBox, QSizePolicy, QMessageBox,
 )
-from PySide6.QtCore import Signal, Qt, QPoint, QMimeData, QTimer
+from PySide6.QtCore import Signal, Qt, QPoint, QMimeData, QTimer, QEvent
 from PySide6.QtGui import QDrag, QFont
 
 from core.prompt_builder import GroupTile, TagTile, NaturalTextTile
@@ -52,6 +52,9 @@ class GroupWidget(QFrame):
         self._drag_start: QPoint | None = None
         self._sub_widgets: list[QWidget] = []   # TileWidget | GroupWidget
         self._drop_index: int = -1
+        self._resize_start_global_x: float | None = None
+        self._resize_start_width: int = 0
+        self._auto_width: int = 80
         self._build_ui()
         self._refresh_sub_tiles()
         # _refresh_tiles による再構築後も展開状態を復元
@@ -108,6 +111,20 @@ class GroupWidget(QFrame):
         hdr_lay.addWidget(self._mode_lbl)
 
         hdr_lay.addStretch()
+
+        # 直下の通常タイルだけをすべて ON（入れ子グループは変更しない）
+        self._all_on_btn = QPushButton("✓✓")
+        self._all_on_btn.setFixedSize(24, 17)
+        self._all_on_btn.setFont(ui_font(-3, bold=True))
+        self._all_on_btn.setToolTip(tr("group.all_on_tooltip"))
+        self._all_on_btn.setStyleSheet(
+            "QPushButton { background: #1a3a1a; color: #a6e3a1; "
+            "border: 1px solid #4a8a4a; border-radius: 2px; padding: 0; }"
+            "QPushButton:hover { background: #2a5a2a; border-color: #a6e3a1; }"
+            "QPushButton:disabled { background: #242432; color: #585b70; border-color: #313244; }"
+        )
+        self._all_on_btn.clicked.connect(self._turn_direct_children_on)
+        hdr_lay.addWidget(self._all_on_btn)
 
         # ON/OFF
         self._toggle_btn = QPushButton("ON")
@@ -210,6 +227,18 @@ class GroupWidget(QFrame):
 
         root.addWidget(self._inner)
 
+        # 横幅変更用の細い右端ハンドル。レイアウト外に重ねることで、既存の
+        # ヘッダー配置や展開時の FlowLayout を変えずに横方向だけ操作できる。
+        self._resize_handle = QWidget(self)
+        self._resize_handle.setCursor(Qt.CursorShape.SizeHorCursor)
+        self._resize_handle.setToolTip(tr("group.resize_tooltip"))
+        self._resize_handle.setStyleSheet(
+            "QWidget { background: transparent; border: none; }"
+            "QWidget:hover { background: rgba(137, 180, 250, 90); }"
+        )
+        self._resize_handle.installEventFilter(self)
+        self._resize_handle.raise_()
+
     @staticmethod
     def _make_order_button(text: str, tooltip: str) -> QPushButton:
         btn = QPushButton(text)
@@ -290,6 +319,7 @@ class GroupWidget(QFrame):
             tr("group.edit_lock_locked_tooltip" if locked else "group.edit_lock_unlocked_tooltip")
         )
         for btn in (
+            self._all_on_btn,
             self._toggle_btn,
             self._delete_btn,
             self._plus_btn,
@@ -307,8 +337,60 @@ class GroupWidget(QFrame):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self._update_resize_handle_geometry()
         if self._expanded:
             self._update_inner_height()
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is not getattr(self, "_resize_handle", None):
+            return super().eventFilter(watched, event)
+
+        etype = event.type()
+        if etype == QEvent.Type.MouseButtonDblClick and event.button() == Qt.MouseButton.LeftButton:
+            if self._readonly:
+                return True
+            self.tile.ui_width = 0
+            self._update_stable_width()
+            self.geometry_changed.emit()
+            self.tile_changed.emit()
+            return True
+
+        if etype == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            if self._readonly:
+                return True
+            self._resize_start_global_x = event.globalPosition().x()
+            self._resize_start_width = self.width()
+            self._resize_handle.grabMouse()
+            return True
+
+        if etype == QEvent.Type.MouseMove and self._resize_start_global_x is not None:
+            delta = event.globalPosition().x() - self._resize_start_global_x
+            new_width = max(self._auto_width, min(4096, int(self._resize_start_width + delta)))
+            self.setFixedWidth(new_width)
+            self.updateGeometry()
+            self.geometry_changed.emit()
+            return True
+
+        if etype == QEvent.Type.MouseButtonRelease and self._resize_start_global_x is not None:
+            try:
+                self._resize_handle.releaseMouse()
+            except Exception:
+                pass
+            self._resize_start_global_x = None
+            self.tile.ui_width = self.width() if self.width() > self._auto_width else 0
+            self._update_stable_width()
+            self.geometry_changed.emit()
+            self.tile_changed.emit()
+            return True
+
+        return super().eventFilter(watched, event)
+
+    def _update_resize_handle_geometry(self) -> None:
+        if not hasattr(self, "_resize_handle"):
+            return
+        handle_width = 6
+        self._resize_handle.setGeometry(max(0, self.width() - handle_width), 0, handle_width, self.height())
+        self._resize_handle.raise_()
 
     # ── 展開 / 折りたたみ ────────────────────────────────
 
@@ -364,7 +446,7 @@ class GroupWidget(QFrame):
         self.updateGeometry()
 
     def _update_stable_width(self) -> None:
-        """展開・折りたたみで横幅が変わらないよう、子タイル基準の幅に固定する。"""
+        """自動最小幅を守りつつ、保存済みの手動幅を適用する。"""
         header_w = self._hdr.sizeHint().width() if hasattr(self, "_hdr") else 0
         inner_m = self._inner.layout().contentsMargins()
         widest_child = 0
@@ -377,22 +459,30 @@ class GroupWidget(QFrame):
             )
         empty_w = self._empty_hint.sizeHint().width() if not self.tile.tiles else 0
         content_w = max(widest_child, empty_w) + inner_m.left() + inner_m.right()
-        self.setFixedWidth(max(header_w, content_w, 80))
+        self._auto_width = max(header_w, content_w, 80)
+        manual_width = max(0, int(getattr(self.tile, "ui_width", 0) or 0))
+        self.setFixedWidth(max(self._auto_width, manual_width))
+        self._update_resize_handle_geometry()
 
     def _update_inner_height(self) -> None:
-        """FlowLayout の必要高さに合わせて _inner の最低高さを設定する。"""
-        cw = self._inner.width()
-        if cw <= 0:
-            cw = self.width()
+        """FlowLayout の必要高さに _inner の実高さを同期する。"""
+        # 横リサイズ中は子の _inner.width() 更新より先にここが呼ばれる。
+        # 親の新しい幅から直接計算し、折り返しが減った時は高さも縮める。
+        cw = self.width()
         if cw <= 0:
             return
         m = self._inner.layout().contentsMargins()
         inner_w = max(1, cw - m.left() - m.right())
+        self._flow.invalidate()
         if self.tile.tiles:
             h = max(28, self._flow.heightForWidth(inner_w))
         else:
             h = self._empty_hint.sizeHint().height()
-        self._inner.setMinimumHeight(h + m.top() + m.bottom())
+        target_h = h + m.top() + m.bottom()
+        if self._inner.height() != target_h or self._inner.minimumHeight() != target_h:
+            self._inner.setFixedHeight(target_h)
+            self._inner.updateGeometry()
+            self.updateGeometry()
 
     def _make_sub_widget(self, tile) -> QWidget:
         if isinstance(tile, GroupTile) and self._depth < _MAX_DEPTH - 1:
@@ -581,6 +671,18 @@ class GroupWidget(QFrame):
         self.tile_changed.emit()
 
     # ── ON/OFF ───────────────────────────────────────────
+
+    def _turn_direct_children_on(self) -> None:
+        """現在のグループ直下にある通常タイルだけを ON にする。
+
+        GroupTile は直下にあっても、そのグループ自身・配下とも変更しない。
+        """
+        if self._readonly or self._is_edit_locked():
+            return
+        if not self.tile.enable_direct_tiles():
+            return
+        self._refresh_sub_tiles()
+        self.tile_changed.emit()
 
     def _toggle_enabled(self) -> None:
         if self._readonly:
@@ -851,12 +953,14 @@ class GroupWidget(QFrame):
         if not self._readonly:
             return
         for btn_name in (
-            "_toggle_btn", "_delete_btn", "_plus_btn", "_minus_btn",
+            "_all_on_btn", "_toggle_btn", "_delete_btn", "_plus_btn", "_minus_btn",
             "_lock_btn", "_ungroup_btn", "_save_btn",
         ):
             btn = getattr(self, btn_name, None)
             if btn is not None:
                 btn.hide()
+        if hasattr(self, "_resize_handle"):
+            self._resize_handle.hide()
         self.setAcceptDrops(False)
 
     # ── ドロップ（サブタイル追加）────────────────────────

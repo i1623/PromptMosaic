@@ -1086,13 +1086,20 @@ class InvokeClient:
 
     @staticmethod
     def _graph_supports_negative_prompt(graph: dict | None) -> bool:
-        """グラフに実生成へ届くネガティブプロンプト経路があるか判定する。"""
+        """グラフがネガティブプロンプト入力を受け取れるか判定する。
+
+        Invoke の Anima グラフは独立した neg_prompt ノードを持たず、
+        core_metadata の negative_prompt フィールドで入力を保持する形式がある。
+        _patch_nodes() が実際に更新する全形式と、表示判定を一致させる。
+        """
         if not graph:
             return True
         for node_id, node in graph.get("nodes", {}).items():
             if node_id.startswith("negative_prompt") and node.get("type") == "string":
                 return True
             if node_id.startswith(("neg_prompt", "neg_cond")) and "prompt" in node:
+                return True
+            if "negative_prompt" in node:
                 return True
         return False
 

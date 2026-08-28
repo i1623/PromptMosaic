@@ -268,6 +268,7 @@ class PromptEditor(QWidget):
     lineage_strip_goto_current_requested = Signal()
     history_stack_requested = Signal(str, int)
     history_stack_clear_requested = Signal()  # スタッククリアボタン
+    prompt_pack_import_requested = Signal()
 
     def __init__(self, parent=None, *, readonly: bool = False):
         super().__init__(parent)
@@ -398,6 +399,15 @@ class PromptEditor(QWidget):
         )
         self._pos_copy_btn.clicked.connect(self._copy_positive)
         pos_hdr_row.addWidget(self._pos_copy_btn)
+
+        self._prompt_pack_import_btn = QToolButton()
+        self._prompt_pack_import_btn.setText("📥")
+        self._prompt_pack_import_btn.setFixedSize(28, 24)
+        self._prompt_pack_import_btn.setToolTip(tr("pack.import_tooltip"))
+        self._prompt_pack_import_btn.setStyleSheet(_btn_ss.format(fg=ACCENT, dis="#555570"))
+        self._prompt_pack_import_btn.clicked.connect(self.prompt_pack_import_requested.emit)
+        self._prompt_pack_import_btn.setVisible(not self._readonly)
+        pos_hdr_row.addWidget(self._prompt_pack_import_btn)
         root.addWidget(self._pos_hdr_widget)
 
         from ui.history_map_dialog import HistoryMapPanel
@@ -702,6 +712,7 @@ class PromptEditor(QWidget):
         self._redo_btn.setToolTip(tr("main.btn_redo_tooltip"))
         self._pos_copy_btn.setText(tr("editor.copy_btn"))
         self._pos_copy_btn.setToolTip(tr("editor.copy_positive_tooltip"))
+        self._prompt_pack_import_btn.setToolTip(tr("pack.import_tooltip"))
         self._neg_copy_btn.setText(tr("editor.copy_btn"))
         self._neg_copy_btn.setToolTip(tr("editor.copy_negative_tooltip"))
         self._preview_local_copy_btn.setText(tr("editor.copy_local_btn"))
