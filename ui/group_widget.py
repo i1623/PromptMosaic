@@ -681,7 +681,14 @@ class GroupWidget(QFrame):
             return
         if not self.tile.enable_direct_tiles():
             return
-        self._refresh_sub_tiles()
+        # ON/OFF は見た目だけを更新する。ここで全子ウィジェットを
+        # 作り直すと、配置確定前の一時的な sizeHint でグループ高さが
+        # 固定され、縦幅が極端に縮む。子の構成は変わらないため再構築は不要。
+        for tile, widget in zip(self.tile.tiles, self._sub_widgets):
+            if isinstance(tile, GroupTile):
+                continue
+            if hasattr(widget, "refresh"):
+                widget.refresh()
         self.tile_changed.emit()
 
     def _toggle_enabled(self) -> None:

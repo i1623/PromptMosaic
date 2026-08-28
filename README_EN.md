@@ -4,8 +4,9 @@
 
 [Japanese](README.md) | [English](README_EN.md)
 
-## Latest Update: v1.5.3
+## Latest Update: v1.5.4
 
+- Fixed the group height becoming extremely short after using the direct-items all-on button.
 - Added per-image PromptMosaic package export from each history image in the right pane. Packages preserve group structure, ON/OFF states, saved group widths, and generation settings. Import is available beside the positive-prompt copy button.
 - Added a button that turns on direct items in a group while leaving nested groups and their ON/OFF states unchanged.
 - Added drag resizing for group width, persistent saved widths, and adaptive vertical sizing based on the resulting wrapped rows.
@@ -59,7 +60,7 @@ It is intended to run next to Invoke: keep Invoke open beside it, then use Promp
 - **11 languages** - Japanese, English, Chinese (Simplified / Traditional), Korean, German, French, Spanish, Italian, Portuguese (Brazil), and Russian.
 - **Simple data backup** - back up PromptMosaic by copying the entire `data` folder.
 
-> **Version:** 1.5.3
+> **Version:** 1.5.4
 > **Target Invoke:** 6.13 or later
 > **Supported OS:** Windows 11 (PySide6 / Python 3.11 recommended)
 
