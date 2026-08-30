@@ -5,7 +5,7 @@
 This document is a feature-by-feature reference for PromptMosaic.
 If you are using PromptMosaic for the first time, read the [Tutorial](TUTORIAL_EN.md) first.
 
-> Target version: **1.5.4** / Target Invoke: **6.13 or later**
+> Target version: **1.6.1** / Target Invoke: **6.13 or later**
 
 ---
 
@@ -129,6 +129,18 @@ Common operations:
 - Save useful arrangements as a tile group.
 
 In the block input field, comma-separated text such as `masterpiece, 1girl, blue eyes:1.2` creates multiple tag tiles. **Add Text** keeps the input as one natural text tile instead of splitting it.
+
+### Connection Groups
+
+A connection group joins its words, sentences, and ordinary groups from left to right with exactly one ASCII space. For example, connect a Random group containing `red / blue / black` to a fixed `sneakers` tile to produce one fragment such as `red sneakers`.
+
+- Use `🔗+` in a block header to create an empty connection group.
+- Drag a tile or ordinary group's `🔗` onto another `🔗`. A temporary curved cable and before/after target show where it will be inserted.
+- Click a connected element's `🔗` to detach it or split the connection before/after it.
+- The connection group's whole-group ON/OFF switch only controls whether the completed fragment appears in the prompt. Its contents remain editable while OFF.
+- The connection-group `✓✓` action recursively finds every Random and Sequential group below it and turns all candidate tiles back on.
+- Only the inside of a connection group scrolls horizontally. Collapsed child groups become equal-width chips that keep their mode icon and the beginning of their title.
+- `⧉` duplicates a group immediately into the center pane. A duplicated connection group starts with whole-group output OFF.
 
 Disabled tiles remain visible but are not sent to Invoke.
 
@@ -295,9 +307,11 @@ A template is the actual Invoke txt2img workflow graph. PromptMosaic stores the 
 
 - At least one template is required for each base model you want to generate with.
 - Multiple templates can be registered for the same base model, and one can be marked as the default.
-- When fetching a template for LoRA use, first create an Invoke txt2img generation that includes at least one LoRA. PromptMosaic reuses that LoRA route.
-- VAE, refiner, and text encoder differences should be distinguished by template name.
-- SDXL refiner stages stored inside the template are preserved. PromptMosaic mainly patches the base stage.
+- When fetching a template, first create an Invoke txt2img generation that includes at least one compatible LoRA. PromptMosaic reuses that LoRA route.
+- For models with true CFG and negative-prompt support, set CFG above 1 and enter a non-empty negative prompt before generating.
+- Disable ControlNet, IP-Adapter, reference images, img2img, inpaint and refiners, and use a standard txt2img generation.
+- If fetching fails, the prompt area in the fetch dialog explains what to change and also shows technical details.
+- Templates fetched before 1.6.1 must be fetched again. On the first launch after updating, PromptMosaic unregisters old templates but keeps their cache JSON files.
 - Many minor Invoke workflow changes can be handled by fetching a fresh template.
 - Template management supports duplicate, rename, set as default, delete, and template cache reset.
 

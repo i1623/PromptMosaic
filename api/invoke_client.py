@@ -42,6 +42,15 @@ class TemplateBaseMismatch(Exception):
         )
 
 
+class TemplateValidationError(InvokeConnectionError):
+    """取得したグラフが PromptMosaic 用の完全なテンプレートではない。"""
+
+    def __init__(self, base: str, issues: list[dict[str, str]]):
+        self.base = base
+        self.issues = issues
+        super().__init__("; ".join(issue["code"] for issue in issues))
+
+
 def _settings() -> dict[str, str]:
     rows = _env_db.fetchall("SELECT key, value FROM env_settings WHERE key IN ('invoke_endpoint', 'invoke_queue_id')")
     return {r["key"]: r["value"] for r in rows}
@@ -54,6 +63,15 @@ class InvokeClient:
     インスタンスはアプリ起動時に1つ作成し、使い回す想定。
     httpxのtimeoutはデフォルト10秒（画像取得時は別途設定）。
     """
+
+    TEMPLATE_CAPTURE_VERSION = 2
+    KNOWN_TEMPLATE_BASES = frozenset({
+        "sd-1", "sdxl", "flux", "flux2", "qwen-image", "z-image", "anima",
+    })
+    # PromptMosaic の現在の生成UIで通常CFGとネガティブプロンプトを扱うベース。
+    NEGATIVE_CAPTURE_BASES = frozenset({
+        "sd-1", "sdxl", "qwen-image", "z-image", "anima",
+    })
 
     def __init__(self, endpoint: str | None = None, queue_id: str | None = None) -> None:
         cfg = _settings()
@@ -568,7 +586,14 @@ class InvokeClient:
                 # ※ flux2 の cfg_scale は 1.0 固定（負プロンプト経路なし）。入力段階（GUI/プラン編集）で
                 #   CFG=1.0 にロックしているため、ここに渡る値も常に 1.0 になる（core.gen_params 参照）。
                 if cfg_scale is not None:
-                    if "guidance_scale" in node:
+                    if ntype == "flux_denoise":
+                        # PromptMosaicの単一CFG欄はFLUXでは蒸留guidanceとして扱う。
+                        # true CFGを上げるとnegative_text_conditioningが必要になるため1.0固定。
+                        if "cfg_scale" in node:
+                            node["cfg_scale"] = 1.0
+                        if "guidance" in node:
+                            node["guidance"] = cfg_scale
+                    elif "guidance_scale" in node:
                         node["guidance_scale"] = cfg_scale
                     elif "cfg_scale" in node:
                         node["cfg_scale"] = cfg_scale
@@ -1043,6 +1068,220 @@ class InvokeClient:
             for e in edges
         )
 
+    @staticmethod
+    def _graph_path_exists(
+        graph: dict,
+        start_ids: set[str],
+        target_ids: set[str],
+    ) -> bool:
+        """エッジの向きに沿って start のいずれかから target へ到達できるか。"""
+        if not start_ids or not target_ids:
+            return False
+        adjacency: dict[str, set[str]] = {}
+        for edge in graph.get("edges", []):
+            src = edge.get("source", {}).get("node_id")
+            dst = edge.get("destination", {}).get("node_id")
+            if src and dst:
+                adjacency.setdefault(src, set()).add(dst)
+        pending = list(start_ids)
+        visited = set(start_ids)
+        while pending:
+            current = pending.pop()
+            if current in target_ids:
+                return True
+            for next_id in adjacency.get(current, ()):
+                if next_id not in visited:
+                    visited.add(next_id)
+                    pending.append(next_id)
+        return False
+
+    @staticmethod
+    def _negative_prompt_node_ids(graph: dict) -> set[str]:
+        result: set[str] = set()
+        for node_id, node in graph.get("nodes", {}).items():
+            if node_id.startswith("negative_prompt") and node.get("type") == "string":
+                result.add(node_id)
+            elif node_id.startswith(("neg_prompt", "neg_cond")) and (
+                "prompt" in node or "value" in node
+            ):
+                result.add(node_id)
+        return result
+
+    @staticmethod
+    def _graph_has_negative_conditioning_path(graph: dict) -> bool:
+        """負プロンプト入力が実際に denoise の負条件入力まで届くか。"""
+        nodes = graph.get("nodes", {})
+        denoise_ids = {
+            node_id for node_id, node in nodes.items()
+            if "denoise" in str(node.get("type", "")) or "denoising_start" in node
+        }
+        negative_ids = InvokeClient._negative_prompt_node_ids(graph)
+        if not InvokeClient._graph_path_exists(graph, negative_ids, denoise_ids):
+            return False
+        return any(
+            edge.get("destination", {}).get("node_id") in denoise_ids
+            and edge.get("destination", {}).get("field") in {
+                "negative_conditioning", "negative_text_conditioning",
+            }
+            for edge in graph.get("edges", [])
+        )
+
+    @staticmethod
+    def _template_validation_issues(graph: dict, base: str) -> list[dict[str, str]]:
+        """PromptMosaic用の標準txt2imgテンプレートとして不足する経路を返す。"""
+        nodes = graph.get("nodes", {})
+        edges = graph.get("edges", [])
+        issues: list[dict[str, str]] = []
+
+        def add(code: str, ja: str, en: str) -> None:
+            if not any(issue["code"] == code for issue in issues):
+                issues.append({"code": code, "ja": ja, "en": en})
+
+        denoise_ids = {
+            node_id for node_id, node in nodes.items()
+            if "denoise" in str(node.get("type", "")) or "denoising_start" in node
+        }
+        loader_ids = {
+            node_id for node_id, node in nodes.items()
+            if "model_loader" in str(node.get("type", ""))
+            and "lora" not in str(node.get("type", ""))
+        }
+        selector_ids = {
+            node_id for node_id, node in nodes.items()
+            if node.get("type") in {"lora_selector", "anima_lora_loader"}
+        }
+        positive_ids = {
+            node_id for node_id, node in nodes.items()
+            if node_id.startswith("positive_prompt") and node.get("type") == "string"
+        }
+        seed_ids = {
+            node_id for node_id, node in nodes.items()
+            if node_id.startswith("seed") and node.get("type") == "integer"
+        }
+        metadata_ids = {
+            node_id for node_id, node in nodes.items() if node.get("type") == "core_metadata"
+        }
+        output_ids = {
+            node_id for node_id, node in nodes.items()
+            if node.get("is_intermediate") is False
+        }
+
+        if not denoise_ids:
+            add("missing_denoise", "denoiseノードがありません", "No denoise node")
+        elif len(denoise_ids) != 1:
+            add(
+                "multiple_denoisers",
+                f"denoiseノードが{len(denoise_ids)}個あります",
+                f"The graph has {len(denoise_ids)} denoise nodes",
+            )
+
+        if InvokeClient._graph_has_refiner(graph):
+            add("refiner_enabled", "Refiner経路が含まれています", "A refiner path is enabled")
+
+        if not InvokeClient._graph_path_exists(graph, loader_ids, denoise_ids):
+            add(
+                "missing_model_path",
+                "モデルローダーからdenoiseまで接続されていません",
+                "The model loader is not connected to denoise",
+            )
+        if not InvokeClient._graph_path_exists(graph, selector_ids, denoise_ids):
+            add(
+                "missing_lora_path",
+                "LoRAからdenoiseまでの適用経路がありません",
+                "No complete LoRA-to-denoise path",
+            )
+        if not InvokeClient._graph_path_exists(graph, positive_ids, denoise_ids):
+            add(
+                "missing_positive_path",
+                "ポジティブプロンプトからdenoiseまで接続されていません",
+                "The positive prompt is not connected to denoise",
+            )
+        if not InvokeClient._graph_path_exists(graph, seed_ids, denoise_ids):
+            add(
+                "missing_seed_path",
+                "seedからdenoiseまで接続されていません",
+                "The seed is not connected to denoise",
+            )
+        if not InvokeClient._graph_path_exists(graph, denoise_ids, output_ids):
+            add(
+                "missing_output_path",
+                "denoiseから通常画像出力まで接続されていません",
+                "Denoise is not connected to a normal image output",
+            )
+        if not InvokeClient._graph_path_exists(graph, metadata_ids, output_ids):
+            add(
+                "missing_metadata_path",
+                "metadataから画像出力まで接続されていません",
+                "Metadata is not connected to the image output",
+            )
+
+        special_fields = {
+            "control", "control_lllite", "control_lora", "ip_adapter", "t2i_adapter",
+            "redux_conditioning", "kontext_conditioning", "fill_conditioning",
+            "denoise_mask", "reference_latents",
+        }
+        active_special = sorted({
+            edge.get("destination", {}).get("field", "")
+            for edge in edges
+            if edge.get("destination", {}).get("field") in special_fields
+        })
+        if active_special:
+            add(
+                "special_conditioning",
+                "追加の画像条件経路があります: " + ", ".join(active_special),
+                "Optional image-conditioning paths are enabled: " + ", ".join(active_special),
+            )
+
+        if base in InvokeClient.NEGATIVE_CAPTURE_BASES:
+            if not InvokeClient._graph_has_negative_conditioning_path(graph):
+                add(
+                    "missing_negative_path",
+                    "ネガティブプロンプトからdenoiseまでの負条件経路がありません",
+                    "No negative-prompt conditioning path reaches denoise",
+                )
+            negative_values: list[str] = []
+            for node_id in InvokeClient._negative_prompt_node_ids(graph):
+                node = nodes[node_id]
+                negative_values.append(str(node.get("prompt", node.get("value", ""))))
+            if not any(value.strip() for value in negative_values):
+                add(
+                    "negative_prompt_empty",
+                    "取得元のネガティブプロンプトが空です",
+                    "The source generation has an empty negative prompt",
+                )
+
+            cfg_field = "guidance_scale" if base in {"anima", "z-image"} else "cfg_scale"
+            cfg_values = [
+                node.get(cfg_field) for node_id, node in nodes.items()
+                if node_id in denoise_ids and isinstance(node.get(cfg_field), (int, float))
+            ]
+            if not cfg_values or not any(float(value) > 1.0 for value in cfg_values):
+                add(
+                    "cfg_not_above_one",
+                    "取得元の通常CFGが1より大きくありません",
+                    "The source generation's true CFG is not greater than 1",
+                )
+
+        if base in {"flux", "flux2"}:
+            true_cfg_values = [
+                node.get("cfg_scale") for node_id, node in nodes.items()
+                if node_id in denoise_ids and isinstance(node.get("cfg_scale"), (int, float))
+            ]
+            if true_cfg_values and any(float(value) != 1.0 for value in true_cfg_values):
+                add(
+                    "flux_true_cfg_not_one",
+                    "FLUXの通常CFGが1.0ではありません",
+                    "FLUX true CFG is not 1.0",
+                )
+
+        return issues
+
+    @staticmethod
+    def validate_template_graph(graph: dict, base: str) -> None:
+        issues = InvokeClient._template_validation_issues(graph, base)
+        if issues:
+            raise TemplateValidationError(base, issues)
+
     # ------------------------------------------------------------------
     # テンプレートキャッシュ（txt2img グラフの保存・再利用）
     # ------------------------------------------------------------------
@@ -1086,22 +1325,10 @@ class InvokeClient:
 
     @staticmethod
     def _graph_supports_negative_prompt(graph: dict | None) -> bool:
-        """グラフがネガティブプロンプト入力を受け取れるか判定する。
-
-        Invoke の Anima グラフは独立した neg_prompt ノードを持たず、
-        core_metadata の negative_prompt フィールドで入力を保持する形式がある。
-        _patch_nodes() が実際に更新する全形式と、表示判定を一致させる。
-        """
+        """負プロンプトが実生成のdenoiseまで届くグラフか判定する。"""
         if not graph:
-            return True
-        for node_id, node in graph.get("nodes", {}).items():
-            if node_id.startswith("negative_prompt") and node.get("type") == "string":
-                return True
-            if node_id.startswith(("neg_prompt", "neg_cond")) and "prompt" in node:
-                return True
-            if "negative_prompt" in node:
-                return True
-        return False
+            return False
+        return InvokeClient._graph_has_negative_conditioning_path(graph)
 
     @staticmethod
     def template_supports_negative(cache_key: str | None) -> bool:
@@ -1186,8 +1413,8 @@ class InvokeClient:
         return cur.lastrowid
 
     def fetch_template_graph(self, expected_base: str | None = None) -> dict:
-        """Invoke の最新完了ジョブの txt2img グラフを取得して返す（保存はしない）。
-        中身の評価はせずベースだけ確認する。命名はこの後 UI 側で行い save_fetched_template で保存。
+        """Invoke の最新完了ジョブから完全な標準 txt2img グラフを取得する（保存はしない）。
+        ベースと必須経路を検証し、命名後に UI から save_fetched_template で保存する。
 
         Returns: {"graph": dict, "base": str}
         Raises:
@@ -1210,14 +1437,7 @@ class InvokeClient:
         base = self._detect_base(graph.get("nodes", {}))
         if expected_base is not None and base != expected_base:
             raise TemplateBaseMismatch(expected_base, base)
-        # LoRA は「テンプレの LoRA 経路を見本に」差し替え注入する方式。
-        # そのため取得する生成には LoRA が1つ以上含まれている必要がある。
-        if not self._graph_has_lora_path(graph):
-            raise InvokeConnectionError(
-                "直近の生成に LoRA が含まれていません。\n"
-                "PromptMosaic は取得するテンプレートの LoRA 経路を見本にするため、\n"
-                "Invoke で LoRA を1つ以上使って画像を生成してから、再度取得してください。"
-            )
+        self.validate_template_graph(graph, base)
         return {"graph": graph, "base": base}
 
     @staticmethod
@@ -1230,8 +1450,9 @@ class InvokeClient:
     @staticmethod
     def save_fetched_template(graph: dict, base: str, name: str | None = None) -> dict:
         """取得したグラフを「常に新しいテンプレート」として保存する。
-        中身の評価・重複判定はしない（同一でも別行として登録される）。
+        完全性を再検証し、同一でも別行として登録する。
         name 未指定なら suggested_template_name。同ベース内で名前衝突したら連番付与。"""
+        InvokeClient.validate_template_graph(graph, base)
         name = (name or "").strip() or InvokeClient.suggested_template_name(base)
         cache_key = InvokeClient._new_cache_key_for_base(base)
         InvokeClient._save_template(graph, cache_key)
@@ -1539,8 +1760,8 @@ class InvokeClient:
           - template_id が指定されていれば、DBの templates.cache_key から
             対応するファイル（data/template_cache_{cache_key}.json）を読み込んで使用する。
             Invoke の最新ジョブは参照しない（保存済みテンプレートが変わらない方が安心）。
-          - template_id が None の場合は旧互換動作（Invoke の最新ジョブを取得、
-            txt2img なら保存、Canvas/img2img なら既存キャッシュを使用）。
+          - template_id が None の場合は旧互換動作（Invoke の最新ジョブを取得して
+            完全性を検証。Canvas/img2img の場合は検証済みキャッシュだけを使用）。
 
         Args:
             model_key:   Invoke モデルの UUID キー。None のとき既存グラフのモデルをそのまま使う。
@@ -1639,6 +1860,8 @@ class InvokeClient:
             graph_template = item["session"]["graph"]
 
             if self._is_txt2img_graph(graph_template):
+                template_base = self._detect_base(graph_template.get("nodes", {}))
+                self.validate_template_graph(graph_template, template_base)
                 cache_key = self._cache_key_from_graph(graph_template)
                 self._save_template(graph_template, cache_key)
                 # templates テーブルにも登録（初回のみ Default として）
@@ -1658,11 +1881,9 @@ class InvokeClient:
                     )
                     graph_template = cached
                 else:
-                    print(
-                        "[PromptMosaic] 警告: Canvas/img2img テンプレートですがキャッシュが"
-                        "ありません。そのまま使用します（noise/latents サイズ不一致の"
-                        "可能性があります）。Invoke で通常の txt2img を一度実行してください。",
-                        file=sys.stderr, flush=True,
+                    raise InvokeConnectionError(
+                        "InvokeでCanvas/img2imgではなく通常のtxt2img画像を1枚生成し、"
+                        "テンプレートを取得し直してください。"
                     )
 
             # 旧互換: 選択モデルの base がテンプレートの base と異なる場合の切替え
@@ -1677,6 +1898,9 @@ class InvokeClient:
                             f"選択中のモデル（{model_base}）のテンプレートが見つかりません。\n"
                             f"モデル一覧から再選択するか、テンプレート編集画面から取得してください。"
                         )
+
+        resolved_base = self._detect_base(graph_template.get("nodes", {}))
+        self.validate_template_graph(graph_template, resolved_base)
 
         # LoRA の hash を DB から補完する
         # LoRAbar に保存された古いデータや履歴からの復元では hash が欠落している場合がある。

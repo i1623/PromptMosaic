@@ -6832,7 +6832,8 @@ class MainWindow(QMainWindow):
         """
         生成1枚目の選択状態（random/sequential グループの選択タイルのみON）を
         中央ペインのドキュメントに反映する。継承権者カード＝右ペインの履歴行と
-        同じ状態になる。タイルUIを再構築し、UNDO で生成前の状態に戻せる。
+        同じ状態になる。構成とグループ寸法は維持して表示だけ更新し、
+        UNDO で生成前の状態に戻せる。
         """
         if not first_sel:
             return
@@ -6849,7 +6850,7 @@ class MainWindow(QMainWindow):
                     t.enabled = new_state
                     changed = True
         if changed:
-            self._editor.refresh_tiles_from_document()
+            self._editor.refresh_tile_states_from_document()
 
     def _apply_model_default_params(self, invoke_key: str) -> None:
         """モデル注釈のデフォルト値(default_steps/cfg/scheduler)が設定されていれば

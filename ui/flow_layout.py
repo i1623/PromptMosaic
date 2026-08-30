@@ -81,6 +81,23 @@ class FlowLayout(QLayout):
         for item in self._items:
             w = item.sizeHint().width()
             h = item.sizeHint().height()
+            widget = item.widget()
+            full_row = bool(widget and widget.property("flow_full_row"))
+
+            if full_row:
+                # 接続グループは中央ペインの一行を単独で使う。前後を必ず
+                # 改行し、中央ペイン自体に横スクロールを発生させない。
+                if line_height > 0 or x != r.x():
+                    x = r.x()
+                    y += line_height + self._v_spacing
+                    line_height = 0
+                layout_w = min(w, max(1, r.width()))
+                if not dry_run:
+                    item.setGeometry(QRect(x, y, layout_w, h))
+                y += h + self._v_spacing
+                x = r.x()
+                line_height = 0
+                continue
             next_x = x + w + self._h_spacing
 
             if next_x - self._h_spacing > r.right() and line_height > 0:

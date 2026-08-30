@@ -4,8 +4,20 @@
 
 [Japanese](README.md) | [English](README_EN.md)
 
-## Latest Update: v1.5.4
+## Latest Update: v1.6.1
 
+- Template fetching now accepts only complete standard txt2img workflows containing all routes PromptMosaic needs, including model, LoRA, positive/negative conditioning, CFG, seed and image output.
+- When fetching fails, the dialog explains what to enable or disable in Invoke and shows the technical validation details in the same prompt area.
+- Prevented incomplete Anima and Z-Image templates captured without LoRA, negative conditioning, or CFG above 1 from changing generation behavior. Existing templates must be fetched again after updating.
+- For FLUX, PromptMosaic's CFG control now changes guidance while true CFG remains at 1.0.
+- Unverified model bases remain visible and are labeled as unverified so unsupported workflows can still be identified.
+
+- Added connection groups that join words, sentences, and ordinary groups from left to right with one ASCII space, making reusable combinations such as `red` + `sneakers` → `red sneakers`.
+- Dragging an element's `🔗` now shows a temporary curved cable and insertion target. Connected items can be inserted before/after, reordered, detached, or split at either side.
+- Connection groups occupy separate vertical rows in the center pane and scroll horizontally only inside their own content. Collapsed child groups become equal-width chips that retain their mode icon and the beginning of their title.
+- A group copy button now duplicates the group immediately into the center pane. Duplicated connection groups start with whole-group output OFF to prevent accidental double prompts.
+- The connection-group `✓✓` action recursively turns on candidate tiles in every nested Random and Sequential group.
+- Updated PromptMosaic packages to format v2 so connection order, whole-group output state, width, and collapsed state are preserved. v1 packages remain importable.
 - Fixed the group height becoming extremely short after using the direct-items all-on button.
 - Added per-image PromptMosaic package export from each history image in the right pane. Packages preserve group structure, ON/OFF states, saved group widths, and generation settings. Import is available beside the positive-prompt copy button.
 - Added a button that turns on direct items in a group while leaving nested groups and their ON/OFF states unchanged.
@@ -60,7 +72,7 @@ It is intended to run next to Invoke: keep Invoke open beside it, then use Promp
 - **11 languages** - Japanese, English, Chinese (Simplified / Traditional), Korean, German, French, Spanish, Italian, Portuguese (Brazil), and Russian.
 - **Simple data backup** - back up PromptMosaic by copying the entire `data` folder.
 
-> **Version:** 1.5.4
+> **Version:** 1.6.1
 > **Target Invoke:** 6.13 or later
 > **Supported OS:** Windows 11 (PySide6 / Python 3.11 recommended)
 

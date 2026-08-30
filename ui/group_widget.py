@@ -13,18 +13,43 @@ from __future__ import annotations
 from PySide6.QtWidgets import (
     QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QDialog, QComboBox, QLineEdit, QDialogButtonBox, QSizePolicy, QMessageBox,
+    QScrollArea,
 )
 from PySide6.QtCore import Signal, Qt, QPoint, QMimeData, QTimer, QEvent
-from PySide6.QtGui import QDrag, QFont
+from PySide6.QtGui import QDrag, QFont, QPainter, QColor
 
 from core.prompt_builder import GroupTile, TagTile, NaturalTextTile
 from core.i18n import tr
 from core.text_sanitize import single_line_text
 from ui.flow_layout import FlowLayout
 from ui.tile_widget import TileWidget, TILE_MIME
+from ui.connection_drag import ConnectionHandle
 from ui.styles import SURFACE0, SURFACE1, SURFACE2, TEXT, SUBTEXT, ACCENT, GREEN, RED, ui_font
 
 _MAX_DEPTH = 3   # ネストの最大深度
+_COMPACT_CONNECTION_CHILD_WIDTH = 102
+
+
+class _ConnectionCanvas(QWidget):
+    """Horizontal chain canvas that paints compact order arrows between nodes."""
+
+    def __init__(self, owner: "GroupWidget", parent=None):
+        super().__init__(parent)
+        self._owner = owner
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        widgets = [w for w in self._owner._sub_widgets if w.isVisible()]
+        if len(widgets) < 2:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QColor(ACCENT))
+        painter.setFont(ui_font(1, bold=True))
+        for left, right in zip(widgets, widgets[1:]):
+            x = (left.geometry().right() + right.geometry().left()) // 2
+            y = min(left.geometry().center().y(), right.geometry().center().y())
+            painter.drawText(x - 5, y + 5, "›")
 
 
 class GroupWidget(QFrame):
@@ -42,12 +67,24 @@ class GroupWidget(QFrame):
     tile_changed     = Signal()
     move_requested   = Signal(object, int)
     geometry_changed = Signal()   # 展開/折りたたみで高さが変わったとき
+    copy_requested   = Signal(object)
 
-    def __init__(self, group: GroupTile, parent=None, nesting_depth: int = 0, *, readonly: bool = False):
+    def __init__(
+        self,
+        group: GroupTile,
+        parent=None,
+        nesting_depth: int = 0,
+        *,
+        readonly: bool = False,
+        compact_in_connection: bool = False,
+    ):
         super().__init__(parent)
         self.tile = group          # BlockWidget と共通の .tile 属性
         self._depth = nesting_depth
         self._readonly = bool(readonly)
+        self._is_connection = group.group_type == "connection"
+        self._group_accent = "#94e2d5" if self._is_connection else ACCENT
+        self._compact_in_connection = bool(compact_in_connection)
         self._expanded = False
         self._drag_start: QPoint | None = None
         self._sub_widgets: list[QWidget] = []   # TileWidget | GroupWidget
@@ -55,6 +92,7 @@ class GroupWidget(QFrame):
         self._resize_start_global_x: float | None = None
         self._resize_start_width: int = 0
         self._auto_width: int = 80
+        self._geometry_settle_pending = False
         self._build_ui()
         self._refresh_sub_tiles()
         # _refresh_tiles による再構築後も展開状態を復元
@@ -63,9 +101,11 @@ class GroupWidget(QFrame):
             self._inner.setVisible(True)
             self._expand_btn.setText("▼")
             self._update_inner_height()
+        self._apply_compact_state()
         self._update_stable_width()
         self._apply_edit_lock_state()
         self._apply_readonly_state()
+        self._sync_minimum_height()
 
     # ── UI構築 ──────────────────────────────────────────
 
@@ -73,10 +113,14 @@ class GroupWidget(QFrame):
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         self.setStyleSheet(
-            f"GroupWidget {{ background: {SURFACE1}; border: 1px solid {ACCENT}; "
+            f"GroupWidget {{ background: {SURFACE1}; border: 1px solid {self._group_accent}; "
             f"border-radius: 4px; }}"
         )
-        self.setAcceptDrops(True)
+        self.setAcceptDrops(not self._is_connection)
+        if self._is_connection:
+            # FlowLayout はこのプロパティを見て前後を改行し、接続グループ同士を
+            # 中央ペインで横並びにしない。
+            self.setProperty("flow_full_row", True)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -84,6 +128,7 @@ class GroupWidget(QFrame):
 
         # ── ヘッダー行 ──────────────────────────────────
         hdr = QWidget()
+        hdr.installEventFilter(self)
         hdr.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         hdr.setStyleSheet(f"background: {SURFACE2}; border-radius: 4px 4px 0 0;")
         hdr_lay = QHBoxLayout(hdr)
@@ -99,9 +144,25 @@ class GroupWidget(QFrame):
         self._expand_btn.clicked.connect(self._toggle_expand)
         hdr_lay.addWidget(self._expand_btn)
 
+        if self._is_connection:
+            self._connection_handle = ConnectionHandle(
+                self,
+                readonly=self._readonly,
+                can_start=False,
+                parent=hdr,
+            )
+            self._connection_handle.setToolTip(tr("connection.group_tooltip"))
+            hdr_lay.addWidget(self._connection_handle)
+        else:
+            self._connection_handle = ConnectionHandle(self, readonly=self._readonly, parent=hdr)
+            hdr_lay.addWidget(self._connection_handle)
+
         self._name_lbl = QLabel(self.tile.name)
         self._name_lbl.setFont(ui_font(bold=True))
-        self._name_lbl.setStyleSheet(f"color: {ACCENT}; background: transparent; border: none;")
+        self._name_lbl.setStyleSheet(
+            f"color: {self._group_accent}; background: transparent; border: none;"
+        )
+        self._name_lbl.installEventFilter(self)
         hdr_lay.addWidget(self._name_lbl)
 
         # モードバッジ
@@ -117,6 +178,8 @@ class GroupWidget(QFrame):
         self._all_on_btn.setFixedSize(24, 17)
         self._all_on_btn.setFont(ui_font(-3, bold=True))
         self._all_on_btn.setToolTip(tr("group.all_on_tooltip"))
+        if self._is_connection:
+            self._all_on_btn.setToolTip(tr("connection.restore_candidates_tooltip"))
         self._all_on_btn.setStyleSheet(
             "QPushButton { background: #1a3a1a; color: #a6e3a1; "
             "border: 1px solid #4a8a4a; border-radius: 2px; padding: 0; }"
@@ -125,6 +188,18 @@ class GroupWidget(QFrame):
         )
         self._all_on_btn.clicked.connect(self._turn_direct_children_on)
         hdr_lay.addWidget(self._all_on_btn)
+
+        self._copy_btn = QPushButton("⧉")
+        self._copy_btn.setFixedSize(20, 17)
+        self._copy_btn.setFont(ui_font(-1, bold=True))
+        self._copy_btn.setToolTip(tr("group.copy_tooltip"))
+        self._copy_btn.setStyleSheet(
+            f"QPushButton {{ background: {SURFACE0}; color: {ACCENT}; "
+            f"border: 1px solid {ACCENT}; border-radius: 2px; padding: 0; }}"
+            f"QPushButton:hover {{ background: {SURFACE2}; }}"
+        )
+        self._copy_btn.clicked.connect(lambda: self.copy_requested.emit(self))
+        hdr_lay.addWidget(self._copy_btn)
 
         # ON/OFF
         self._toggle_btn = QPushButton("ON")
@@ -208,10 +283,31 @@ class GroupWidget(QFrame):
         inner_lay.setContentsMargins(4, 4, 4, 4)
         inner_lay.setSpacing(2)
 
-        self._flow = FlowLayout(h_spacing=4, v_spacing=4)
-        inner_lay.addLayout(self._flow)
+        if self._is_connection:
+            self._chain_scroll = QScrollArea(self._inner)
+            self._chain_scroll.setFrameShape(QFrame.Shape.NoFrame)
+            self._chain_scroll.setWidgetResizable(False)
+            self._chain_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self._chain_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self._chain_scroll.setStyleSheet(
+                f"QScrollArea {{ background: {SURFACE0}; border: none; }}"
+                f"QScrollBar:horizontal {{ height: 9px; background: {SURFACE1}; }}"
+                f"QScrollBar::handle:horizontal {{ background: {SURFACE2}; border-radius: 4px; }}"
+            )
+            self._chain_canvas = _ConnectionCanvas(self)
+            self._chain_canvas.setStyleSheet(f"background: {SURFACE0}; border: none;")
+            self._flow = QHBoxLayout(self._chain_canvas)
+            self._flow.setContentsMargins(2, 2, 2, 2)
+            self._flow.setSpacing(26)
+            self._chain_scroll.setWidget(self._chain_canvas)
+            inner_lay.addWidget(self._chain_scroll)
+        else:
+            self._chain_scroll = None
+            self._chain_canvas = None
+            self._flow = FlowLayout(h_spacing=4, v_spacing=4)
+            inner_lay.addLayout(self._flow)
 
-        self._drop_indicator = QFrame(self._inner)
+        self._drop_indicator = QFrame(self._chain_canvas or self._inner)
         self._drop_indicator.setFixedWidth(3)
         self._drop_indicator.setStyleSheet(
             f"background-color: {ACCENT}; border-radius: 1px; border: none;"
@@ -320,6 +416,7 @@ class GroupWidget(QFrame):
         )
         for btn in (
             self._all_on_btn,
+            self._copy_btn,
             self._toggle_btn,
             self._delete_btn,
             self._plus_btn,
@@ -327,9 +424,11 @@ class GroupWidget(QFrame):
             self._ungroup_btn,
         ):
             btn.setEnabled(not locked)
+        if self._connection_handle is not None:
+            self._connection_handle.setEnabled(not locked and not self._readonly)
         # readonly（履歴タイルクローン等）では _apply_readonly_state の
         # setAcceptDrops(False) を上書きしない（クローンへのドロップ禁止を維持）
-        self.setAcceptDrops(not locked and not self._readonly)
+        self.setAcceptDrops(not self._is_connection and not locked and not self._readonly)
         for widget in self._sub_widgets:
             widget.setEnabled(not locked)
 
@@ -342,6 +441,16 @@ class GroupWidget(QFrame):
             self._update_inner_height()
 
     def eventFilter(self, watched, event) -> bool:
+        if watched in (getattr(self, "_name_lbl", None), getattr(self, "_hdr", None)):
+            if (
+                self._compact_in_connection
+                and not self._expanded
+                and event.type() == QEvent.Type.MouseButtonRelease
+                and event.button() == Qt.MouseButton.LeftButton
+            ):
+                self._toggle_expand()
+                return True
+            return super().eventFilter(watched, event)
         if watched is not getattr(self, "_resize_handle", None):
             return super().eventFilter(watched, event)
 
@@ -365,7 +474,8 @@ class GroupWidget(QFrame):
 
         if etype == QEvent.Type.MouseMove and self._resize_start_global_x is not None:
             delta = event.globalPosition().x() - self._resize_start_global_x
-            new_width = max(self._auto_width, min(4096, int(self._resize_start_width + delta)))
+            max_width = self._available_connection_width() if self._is_connection else 4096
+            new_width = max(self._auto_width, min(max_width, int(self._resize_start_width + delta)))
             self.setFixedWidth(new_width)
             self.updateGeometry()
             self.geometry_changed.emit()
@@ -392,6 +502,13 @@ class GroupWidget(QFrame):
         self._resize_handle.setGeometry(max(0, self.width() - handle_width), 0, handle_width, self.height())
         self._resize_handle.raise_()
 
+    def _available_connection_width(self) -> int:
+        if not self._is_connection:
+            return 4096
+        parent = self.parentWidget()
+        available = parent.width() - 8 if parent is not None and parent.width() > 0 else 4096
+        return max(self._auto_width, available)
+
     # ── 展開 / 折りたたみ ────────────────────────────────
 
     def _toggle_expand(self) -> None:
@@ -399,11 +516,13 @@ class GroupWidget(QFrame):
         self.tile.ui_expanded = self._expanded   # GroupTile に保持して再構築後も復元
         self._inner.setVisible(self._expanded)
         self._expand_btn.setText("▼" if self._expanded else "▶")
+        self._apply_compact_state()
         self._update_stable_width()
         if self._expanded:
             self._update_inner_height()
         else:
             self._inner.setMinimumHeight(0)
+            self._sync_minimum_height()
         self.updateGeometry()
         self.geometry_changed.emit()
 
@@ -415,11 +534,49 @@ class GroupWidget(QFrame):
         self.tile.ui_expanded = True
         self._inner.setVisible(True)
         self._expand_btn.setText("▼")
+        self._apply_compact_state()
         self._update_stable_width()
         self._update_inner_height()
         self.updateGeometry()
         self.geometry_changed.emit()
         return True
+
+    def _compact_title(self) -> str:
+        icon = "🎲" if self.tile.mode == "random" else "🔢" if self.tile.mode == "sequential" else "▣"
+        available = 42
+        text = ""
+        metrics = self._name_lbl.fontMetrics()
+        for char in self.tile.name:
+            candidate = text + char
+            if metrics.horizontalAdvance(candidate) > available:
+                break
+            text = candidate
+        return f"{icon} {text or self.tile.name[:1]}"
+
+    def _apply_compact_state(self) -> None:
+        compact = self._compact_in_connection and not self._expanded
+        self._mode_lbl.setVisible(not compact)
+        edit_controls = (
+            self._all_on_btn,
+            self._copy_btn,
+            self._toggle_btn,
+            self._delete_btn,
+            self._plus_btn,
+            self._minus_btn,
+            self._lock_btn,
+            self._ungroup_btn,
+            self._save_btn,
+        )
+        for control in edit_controls:
+            control.setVisible(not compact and not self._readonly)
+        self._name_lbl.setText(self._compact_title() if compact else self.tile.name)
+        state = "ON" if self.tile.enabled else "OFF"
+        self._name_lbl.setToolTip(
+            f"{self.tile.name}\n{tr('group.mode_random') if self.tile.mode == 'random' else tr('group.mode_sequential') if self.tile.mode == 'sequential' else tr('group.mode_none')} / {state}"
+        )
+        self._resize_handle.setVisible(not compact)
+        if compact:
+            self.setFixedWidth(_COMPACT_CONNECTION_CHILD_WIDTH)
 
     # ── サブタイル管理 ────────────────────────────────────
 
@@ -435,18 +592,34 @@ class GroupWidget(QFrame):
 
         for tile in self.tile.tiles:
             w = self._make_sub_widget(tile)
-            self._flow.addWidget(w)
+            if self._is_connection:
+                # 接続列の高さに合わせて短い子まで縦に引き伸ばされないよう、
+                # 各要素は固有の高さのまま上端へ揃える。
+                self._flow.addWidget(w, 0, Qt.AlignmentFlag.AlignTop)
+            else:
+                self._flow.addWidget(w)
             self._sub_widgets.append(w)
+            # 表示中のグループを再構築した直後は、Qtが子をまだ非表示扱いにして
+            # QWidgetItem.sizeHint()を0で返すことがある。明示的に表示状態へ戻して
+            # から高さを測り、D&D後に最小高へ縮んだままになるのを防ぐ。
+            w.show()
 
         self._empty_hint.setVisible(len(self.tile.tiles) == 0)
         self._flow.invalidate()
         self._update_stable_width()
         self._update_inner_height()
         self._apply_edit_lock_state()
+        if self._is_connection and self._chain_canvas is not None:
+            self._chain_canvas.update()
         self.updateGeometry()
 
     def _update_stable_width(self) -> None:
         """自動最小幅を守りつつ、保存済みの手動幅を適用する。"""
+        if self._compact_in_connection and not self._expanded:
+            self._auto_width = _COMPACT_CONNECTION_CHILD_WIDTH
+            self.setFixedWidth(_COMPACT_CONNECTION_CHILD_WIDTH)
+            self._update_resize_handle_geometry()
+            return
         header_w = self._hdr.sizeHint().width() if hasattr(self, "_hdr") else 0
         inner_m = self._inner.layout().contentsMargins()
         widest_child = 0
@@ -458,10 +631,21 @@ class GroupWidget(QFrame):
                 widget.minimumWidth(),
             )
         empty_w = self._empty_hint.sizeHint().width() if not self.tile.tiles else 0
-        content_w = max(widest_child, empty_w) + inner_m.left() + inner_m.right()
-        self._auto_width = max(header_w, content_w, 80)
+        if self._is_connection and self._chain_canvas is not None:
+            content_w = self._flow.sizeHint().width() + inner_m.left() + inner_m.right()
+        else:
+            content_w = max(widest_child, empty_w) + inner_m.left() + inner_m.right()
+        if self._is_connection:
+            # 接続列全体ではなく、見渡しやすいビューポート幅を自動値にする。
+            content_w = min(content_w, 720)
+            self._auto_width = max(header_w, content_w, 320)
+        else:
+            self._auto_width = max(header_w, content_w, 80)
         manual_width = max(0, int(getattr(self.tile, "ui_width", 0) or 0))
-        self.setFixedWidth(max(self._auto_width, manual_width))
+        target_width = max(self._auto_width, manual_width)
+        if self._is_connection:
+            target_width = min(target_width, self._available_connection_width())
+        self.setFixedWidth(target_width)
         self._update_resize_handle_geometry()
 
     def _update_inner_height(self) -> None:
@@ -472,6 +656,26 @@ class GroupWidget(QFrame):
         if cw <= 0:
             return
         m = self._inner.layout().contentsMargins()
+        if self._is_connection and self._chain_canvas is not None and self._chain_scroll is not None:
+            if self.tile.tiles:
+                hint = self._flow.sizeHint()
+                canvas_w = max(1, hint.width())
+                canvas_h = max(28, hint.height())
+            else:
+                canvas_w = max(1, cw - m.left() - m.right())
+                canvas_h = 28
+            self._chain_canvas.setFixedSize(canvas_w, canvas_h)
+            scroll_h = canvas_h + (11 if canvas_w > max(1, cw - m.left() - m.right()) else 0)
+            self._chain_scroll.setFixedHeight(scroll_h)
+            target_h = scroll_h + m.top() + m.bottom()
+            if not self.tile.tiles:
+                target_h += self._empty_hint.sizeHint().height()
+            self._inner.setFixedHeight(target_h)
+            self._chain_canvas.update()
+            self._inner.updateGeometry()
+            self._sync_minimum_height()
+            self.updateGeometry()
+            return
         inner_w = max(1, cw - m.left() - m.right())
         self._flow.invalidate()
         if self.tile.tiles:
@@ -482,21 +686,91 @@ class GroupWidget(QFrame):
         if self._inner.height() != target_h or self._inner.minimumHeight() != target_h:
             self._inner.setFixedHeight(target_h)
             self._inner.updateGeometry()
-            self.updateGeometry()
+        self._sync_minimum_height()
+        self.updateGeometry()
+
+    def _sync_minimum_height(self) -> None:
+        """ヘッダーと展開中の内容より小さく縮まないよう下限を同期する。"""
+        if not hasattr(self, "_hdr"):
+            return
+        header_h = max(
+            self._hdr.height(),
+            self._hdr.sizeHint().height(),
+            self._hdr.minimumSizeHint().height(),
+        )
+        # 接続グループの子は、親がまだ非表示の構築中には isVisible() が False に
+        # なる。展開状態そのものを基準にしないとヘッダー分だけへ縮んでしまう。
+        inner_h = self._inner.height() if self._expanded else 0
+        minimum_h = max(1, header_h + inner_h)
+        if self.minimumHeight() != minimum_h:
+            self.setMinimumHeight(minimum_h)
+
+    def _schedule_geometry_settle(self) -> None:
+        """D&D後、Qtが子配置を確定した次のイベントで親まで高さを伝える。"""
+        if self._geometry_settle_pending:
+            return
+        self._geometry_settle_pending = True
+        QTimer.singleShot(0, self._settle_geometry)
+
+    def _settle_geometry(self) -> None:
+        self._geometry_settle_pending = False
+        self._flow.invalidate()
+        self._update_stable_width()
+        if self._expanded:
+            self._update_inner_height()
+        else:
+            self._sync_minimum_height()
+        layout = self.layout()
+        if layout is not None:
+            layout.activate()
+        self.updateGeometry()
+        self.geometry_changed.emit()
+
+    def show_connection_insert_marker(self, index: int) -> None:
+        if not self._is_connection or self._chain_canvas is None:
+            return
+        self._flow.activate()
+        count = len(self._sub_widgets)
+        index = max(0, min(index, count))
+        if count == 0:
+            x = 4
+        elif index <= 0:
+            x = max(1, self._sub_widgets[0].geometry().left() - 8)
+        elif index >= count:
+            x = self._sub_widgets[-1].geometry().right() + 8
+        else:
+            x = (
+                self._sub_widgets[index - 1].geometry().right()
+                + self._sub_widgets[index].geometry().left()
+            ) // 2
+        self._drop_indicator.setGeometry(x, 2, 3, max(24, self._chain_canvas.height() - 4))
+        self._drop_indicator.raise_()
+        self._drop_indicator.show()
+
+    def hide_connection_insert_marker(self) -> None:
+        self._drop_indicator.hide()
 
     def _make_sub_widget(self, tile) -> QWidget:
+        child_parent = self._chain_canvas or self._inner
         if isinstance(tile, GroupTile) and self._depth < _MAX_DEPTH - 1:
-            gw = GroupWidget(tile, self._inner, nesting_depth=self._depth + 1, readonly=self._readonly)
+            gw = GroupWidget(
+                tile,
+                child_parent,
+                nesting_depth=self._depth + 1,
+                readonly=self._readonly,
+                compact_in_connection=self._is_connection,
+            )
             gw.delete_requested.connect(self._on_sub_delete)
             gw.ungroup_requested.connect(self._on_sub_ungroup)
             gw.tile_changed.connect(self._on_sub_changed)
             gw.geometry_changed.connect(self._on_sub_geometry_changed)
             gw.move_requested.connect(self._on_sub_move_requested)
+            gw.copy_requested.connect(self.copy_requested.emit)
             return gw
         else:
             # parent=self._inner を指定することで、_inner が表示されているとき
             # 自動的に表示される（親なしだと show() されない）
-            tw = TileWidget(tile, parent=self._inner, readonly=self._readonly)
+            tw = TileWidget(tile, parent=child_parent, readonly=self._readonly)
             tw.delete_requested.connect(self._on_sub_delete)
             tw.tile_changed.connect(self._on_sub_changed)
             tw.tile_replaced.connect(self._on_sub_replaced)
@@ -530,8 +804,15 @@ class GroupWidget(QFrame):
             if idx >= 0:
                 self.tile.tiles.pop(idx)
 
-        # タイルが1個になったらグループ解消
-        if len(self.tile.tiles) == 1:
+        # 通常グループだけは1個以下で従来どおり解消する。
+        # 接続グループは名前・幅・出力設定を保持するため空でも残す。
+        if self.tile.group_type == "connection":
+            if idx >= 0:
+                self._remove_sub_widget(idx)
+            else:
+                self._refresh_sub_tiles()
+            self.tile_changed.emit()
+        elif len(self.tile.tiles) == 1:
             self.tile_changed.emit()   # 親に通知して解消させる
         elif len(self.tile.tiles) == 0:
             self.delete_requested.emit(self)
@@ -584,7 +865,7 @@ class GroupWidget(QFrame):
             idx = self._index_by_identity(self._sub_widgets, sender)
             if idx < 0:
                 idx = self._index_by_identity(self.tile.tiles, sender.tile)
-            if idx >= 0 and len(sender.tile.tiles) <= 1:
+            if idx >= 0 and sender.tile.group_type != "connection" and len(sender.tile.tiles) <= 1:
                 self._sync_sub_group_after_child_removed(idx, sender)
                 self.tile_changed.emit()
                 return
@@ -594,6 +875,11 @@ class GroupWidget(QFrame):
 
     def _sync_sub_group_after_child_removed(self, index: int, group_widget) -> None:
         remaining = len(group_widget.tile.tiles)
+        if getattr(group_widget.tile, "group_type", "normal") == "connection":
+            group_widget._refresh_sub_tiles()
+            group_widget._update_inner_height()
+            self._on_sub_geometry_changed()
+            return
         if remaining >= 2:
             group_widget._refresh_sub_tiles()
             group_widget._update_inner_height()
@@ -610,7 +896,10 @@ class GroupWidget(QFrame):
     def _replace_sub_widget(self, index: int, tile) -> None:
         self._remove_sub_widget(index)
         w = self._make_sub_widget(tile)
-        self._flow.insertWidget(index, w)
+        if self._is_connection:
+            self._flow.insertWidget(index, w, 0, Qt.AlignmentFlag.AlignTop)
+        else:
+            self._flow.insertWidget(index, w)
         self._sub_widgets.insert(index, w)
         w.show()
         self._flow.invalidate()
@@ -679,16 +968,26 @@ class GroupWidget(QFrame):
         """
         if self._readonly or self._is_edit_locked():
             return
-        if not self.tile.enable_direct_tiles():
+        changed = (
+            self.tile.restore_selection_candidates_recursive()
+            if self._is_connection
+            else self.tile.enable_direct_tiles()
+        )
+        if not changed:
             return
         # ON/OFF は見た目だけを更新する。ここで全子ウィジェットを
         # 作り直すと、配置確定前の一時的な sizeHint でグループ高さが
         # 固定され、縦幅が極端に縮む。子の構成は変わらないため再構築は不要。
-        for tile, widget in zip(self.tile.tiles, self._sub_widgets):
-            if isinstance(tile, GroupTile):
-                continue
-            if hasattr(widget, "refresh"):
-                widget.refresh()
+        def _refresh_enabled(group_widget: "GroupWidget") -> None:
+            for widget in group_widget._sub_widgets:
+                if isinstance(widget, GroupWidget):
+                    widget._apply_toggle_style()
+                    widget._apply_compact_state()
+                    _refresh_enabled(widget)
+                elif hasattr(widget, "refresh"):
+                    widget.refresh()
+
+        _refresh_enabled(self)
         self.tile_changed.emit()
 
     def _toggle_enabled(self) -> None:
@@ -721,9 +1020,15 @@ class GroupWidget(QFrame):
             )
             return
         self.setStyleSheet(
-            f"GroupWidget {{ background: {SURFACE1}; border: 1px solid {ACCENT}; "
+            f"GroupWidget {{ background: {SURFACE1}; border: 1px solid {self._group_accent}; "
             f"border-radius: 4px; }}"
         )
+
+    def play_copy_hint(self) -> None:
+        self.setStyleSheet(
+            f"GroupWidget {{ background: {SURFACE1}; border: 3px solid #f9e2af; border-radius: 5px; }}"
+        )
+        QTimer.singleShot(1400, self._apply_toggle_style)
 
     # ── タグブラウザへの保存 ──────────────────────────────
 
@@ -774,6 +1079,8 @@ class GroupWidget(QFrame):
             strength = "+" * self.tile.strength_level
         elif getattr(self.tile, "strength_level", 0) < 0:
             strength = "-" * abs(self.tile.strength_level)
+        if self._is_connection:
+            return strength
         if self.tile.mode == "random":
             return f"{strength} 🎲×{self.tile.count}".strip()
         elif self.tile.mode == "sequential":
@@ -785,6 +1092,7 @@ class GroupWidget(QFrame):
         self._mode_lbl.setText(self._mode_badge())
         self._apply_toggle_style()
         self._refresh_sub_tiles()
+        self._apply_compact_state()
         self._apply_edit_lock_state()
 
     def refresh_tile_styles(self) -> None:
@@ -798,6 +1106,15 @@ class GroupWidget(QFrame):
         if self._expanded:
             self._update_inner_height()
         self.updateGeometry()
+
+    def refresh_tile_states(self) -> None:
+        """構成を作り直さず、ON/OFFなどサイズ不変の表示だけを更新する。"""
+        self._apply_toggle_style()
+        for widget in self._sub_widgets:
+            if isinstance(widget, GroupWidget):
+                widget.refresh_tile_states()
+            elif hasattr(widget, "refresh"):
+                widget.refresh()
 
     def refresh_tile_display(self) -> None:
         """子タイルの1段/2段表示切替を即時反映する。"""
@@ -829,7 +1146,9 @@ class GroupWidget(QFrame):
         self._inner.setVisible(False)
         self._expand_btn.setText("▶")
         self._inner.setMinimumHeight(0)
+        self._apply_compact_state()
         self._update_stable_width()
+        self._sync_minimum_height()
         self.updateGeometry()
         self.geometry_changed.emit()
         return changed
@@ -851,6 +1170,7 @@ class GroupWidget(QFrame):
         self._expanded = True
         self._inner.setVisible(True)
         self._expand_btn.setText("▼")
+        self._apply_compact_state()
         self._update_stable_width()
         self._update_inner_height()
         self.updateGeometry()
@@ -961,7 +1281,7 @@ class GroupWidget(QFrame):
             return
         for btn_name in (
             "_all_on_btn", "_toggle_btn", "_delete_btn", "_plus_btn", "_minus_btn",
-            "_lock_btn", "_ungroup_btn", "_save_btn",
+            "_lock_btn", "_ungroup_btn", "_save_btn", "_copy_btn", "_connection_handle",
         ):
             btn = getattr(self, btn_name, None)
             if btn is not None:
@@ -1152,14 +1472,15 @@ class GroupWidget(QFrame):
             # setVisible(True) 後に改めて高さを計算（非表示中は幅が 0 のため）
             self._update_inner_height()
 
-        # ドロップ後に親レイアウトの幅が確定してから、もう一度高さを取り直す。
-        QTimer.singleShot(0, self._update_inner_height)
+        # ドロップ後に親レイアウトの幅が確定してから、親接続グループまで
+        # 確定後の高さを伝える。
+        self._schedule_geometry_settle()
 
         if source_owner is not None and source_owner is not self:
             if isinstance(source_owner, GroupWidget):
                 if len(source_owner.tile.tiles) >= 2:
                     source_owner._refresh_sub_tiles()
-                    source_owner.geometry_changed.emit()
+                    source_owner._schedule_geometry_settle()
                 else:
                     source_owner.tile_changed.emit()
             else:
@@ -1241,6 +1562,7 @@ class GroupWidget(QFrame):
         source_owner = None if src_readonly else self._remove_tile_from_source(src, refresh=False)
         self._refresh_sub_tiles()
         self._expand_after_drop()
+        self._schedule_geometry_settle()
         self._notify_source_after_removal(source_owner)
         self.updateGeometry()
         self.geometry_changed.emit()
@@ -1274,7 +1596,7 @@ class GroupWidget(QFrame):
             self.tile.tiles.append(tile)
             self.ensure_expanded()
             self._refresh_sub_tiles()
-            self.geometry_changed.emit()
+            self._schedule_geometry_settle()
             self.tile_changed.emit()
             self._notify_source_after_removal(source_owner)
             return True
@@ -1310,7 +1632,7 @@ class GroupWidget(QFrame):
                 return False
             target_owner.tile.tiles[idx] = group
             target_owner._refresh_sub_tiles()
-            target_owner.geometry_changed.emit()
+            target_owner._schedule_geometry_settle()
             target_owner.tile_changed.emit()
         elif isinstance(target_owner, BlockWidget):
             idx = self._index_by_identity(target_owner.block.tiles, self.tile)
@@ -1363,7 +1685,7 @@ class GroupWidget(QFrame):
             self._inner.setVisible(True)
             self._expand_btn.setText("▼")
         self._update_inner_height()
-        QTimer.singleShot(0, self._update_inner_height)
+        self._schedule_geometry_settle()
 
     def _notify_source_after_removal(self, source_owner: QWidget | None) -> None:
         if source_owner is None or source_owner is self:
@@ -1371,7 +1693,7 @@ class GroupWidget(QFrame):
         if isinstance(source_owner, GroupWidget):
             if len(source_owner.tile.tiles) >= 2:
                 source_owner._refresh_sub_tiles()
-                source_owner.geometry_changed.emit()
+                source_owner._schedule_geometry_settle()
             else:
                 source_owner.tile_changed.emit()
             return
@@ -1387,6 +1709,8 @@ class GroupWidget(QFrame):
         if self._is_edit_locked():
             return False
         if isinstance(tile, GroupTile):
+            if self.tile.group_type == "connection" or tile.group_type == "connection":
+                return False
             # 親グループを自分の子孫グループへ入れると循環して表示ツリーが壊れる。
             if self._group_contains(tile, self.tile):
                 return False
@@ -1573,6 +1897,7 @@ class _GroupEditDialog(QDialog):
 
         # ── 選択モード ────────────────────────────────────
         frame, sec = self._section(tr("group.mode_label"))
+        self._mode_frame = frame
         self._mode_combo = QComboBox()
         self._mode_combo.addItem(tr("group.mode_none"), "none")
         self._mode_combo.addItem(tr("group.mode_random"), "random")
@@ -1586,6 +1911,7 @@ class _GroupEditDialog(QDialog):
 
         # ── 選択個数 ──────────────────────────────────────
         frame, sec = self._section(tr("group.count_label"))
+        self._count_frame = frame
         count_row = QHBoxLayout()
         count_row.setSpacing(4)
         self._count_edit = QLineEdit(str(self._group.count))
@@ -1629,10 +1955,15 @@ class _GroupEditDialog(QDialog):
         lay.addWidget(frame)
 
         # ── シーケンスリセット ────────────────────────────
-        reset_btn = QPushButton(tr("group.sequence_reset"))
-        reset_btn.setFont(ui_font(-1))
-        reset_btn.clicked.connect(lambda: self._group.reset_seq())
-        lay.addWidget(reset_btn)
+        self._reset_btn = QPushButton(tr("group.sequence_reset"))
+        self._reset_btn.setFont(ui_font(-1))
+        self._reset_btn.clicked.connect(lambda: self._group.reset_seq())
+        lay.addWidget(self._reset_btn)
+
+        if self._group.group_type == "connection":
+            self._mode_frame.hide()
+            self._count_frame.hide()
+            self._reset_btn.hide()
 
         btns = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -1648,7 +1979,7 @@ class _GroupEditDialog(QDialog):
         name = single_line_text(self._name_edit.text())
         if name:
             self._group.name = name
-        self._group.mode  = self._mode_combo.currentData()
+        self._group.mode = "none" if self._group.group_type == "connection" else self._mode_combo.currentData()
         try:
             self._group.count = max(1, int(self._count_edit.text().strip() or "1"))
         except ValueError:

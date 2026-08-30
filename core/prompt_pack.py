@@ -23,7 +23,8 @@ from core.import_security import (
 
 PACK_SUFFIX = ".promptmosaic-pack"
 PACK_FORMAT = "PromptMosaic image prompt"
-PACK_VERSION = 1
+PACK_VERSION = 2
+SUPPORTED_PACK_VERSIONS = {1, PACK_VERSION}
 MAX_PACK_ITEMS = 20_000
 MAX_PACK_DEPTH = 32
 MAX_PACK_STRING_CHARS = 100_000
@@ -124,7 +125,7 @@ def read_prompt_pack(path: str | Path) -> dict:
         raise PromptPackError("package contains unsupported root fields")
     if data.get("format") != PACK_FORMAT:
         raise PromptPackError("not a PromptMosaic image prompt package")
-    if data.get("format_version") != PACK_VERSION:
+    if data.get("format_version") not in SUPPORTED_PACK_VERSIONS:
         raise PromptPackError(
             f"unsupported package version: {data.get('format_version')!r}"
         )

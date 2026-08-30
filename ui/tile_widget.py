@@ -33,6 +33,7 @@ from core.i18n import tr
 from core.lm_settings import lm_seed, lm_temperature
 from core.text_sanitize import single_line_text
 from ui.styles import get_tile_style, tag_browser_chip_colors, is_light_theme, SURFACE0, SURFACE1, SURFACE2, TEXT, SUBTEXT, RED, ui_font
+from ui.connection_drag import ConnectionHandle
 
 
 def _unregistered_tile_style() -> tuple[str, str, str]:
@@ -496,6 +497,9 @@ class TileWidget(QWidget):
         )
         self._del_btn.clicked.connect(lambda: self.delete_requested.emit(self))
         self._btn_row1_lay.addWidget(self._del_btn)
+
+        self._connection_handle = ConnectionHandle(self, readonly=self._readonly, parent=self)
+        self._btn_row1_lay.addWidget(self._connection_handle)
 
         # TagTile / NaturalTextTile: +/- は初期状態で row1 に並べる。2段表示時に row2 へ移動する。
         # row2 は QWidget コンテナなしの QHBoxLayout を直接 btn_vbox に追加。
@@ -1391,7 +1395,7 @@ class TileWidget(QWidget):
     def _apply_readonly_state(self) -> None:
         if not self._readonly:
             return
-        for btn_name in ("_toggle_btn", "_del_btn", "_plus_btn", "_minus_btn"):
+        for btn_name in ("_toggle_btn", "_del_btn", "_plus_btn", "_minus_btn", "_connection_handle"):
             btn = getattr(self, btn_name, None)
             if btn is not None:
                 btn.hide()

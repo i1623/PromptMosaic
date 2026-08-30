@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 
 import db.app_db as _app_db
 import db.env_db as _env_db
-from api.invoke_client import InvokeClient, TemplateBaseMismatch
+from api.invoke_client import InvokeClient, TemplateBaseMismatch, TemplateValidationError
 from core.i18n import available_languages, current_language, set_language, tr
 from ui.model_browser import _SyncWorker, _base_label
 from ui.styles import (
@@ -58,8 +58,8 @@ class _SetupConnWorker(QThread):
 
 class _FetchTemplateWorker(QThread):
     ok = Signal(dict)
-    mismatch = Signal(str)   # 期待ベース（行のベース）
-    ng = Signal(str)
+    mismatch = Signal(str, str)   # 期待ベース, 実際のベース
+    ng = Signal(object)
 
     def __init__(self, client: InvokeClient, expected_base: str, parent=None):
         super().__init__(parent)
@@ -70,10 +70,10 @@ class _FetchTemplateWorker(QThread):
         try:
             res = self._client.fetch_template_graph(expected_base=self._expected_base)
             self.ok.emit(res)
-        except TemplateBaseMismatch:
-            self.mismatch.emit(self._expected_base)
+        except TemplateBaseMismatch as exc:
+            self.mismatch.emit(exc.expected_base, exc.actual_base)
         except Exception as exc:
-            self.ng.emit(str(exc))
+            self.ng.emit(exc)
 
 
 class InvokeSetupDialog(QDialog):
@@ -192,6 +192,13 @@ class InvokeSetupDialog(QDialog):
             f"border: 1px solid {YELLOW}; border-radius: 4px; padding: 8px;"
         )
         s2.addWidget(self._step2_warn)
+
+        # モデル別の取得手順と、失敗時の技術詳細を同じ欄に表示する。
+        self._capture_prompt = QLabel(self._capture_guide(""))
+        self._capture_prompt.setWordWrap(True)
+        self._capture_prompt.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._set_capture_prompt(self._capture_prompt.text())
+        s2.addWidget(self._capture_prompt)
 
         self._table = QTableWidget(0, 4)
         self._table.setHorizontalHeaderLabels([
@@ -314,6 +321,7 @@ class InvokeSetupDialog(QDialog):
         self._step2_box._title_label.setText(tr("invoke_setup.step2_title"))  # type: ignore[attr-defined]
         self._step2_info.setText(tr("invoke_setup.step2_info"))
         self._step2_warn.setText(tr("invoke_setup.step2_lora_note"))
+        self._set_capture_prompt(self._capture_guide(""))
         self._outputs_label.setText(tr("invoke_setup.outputs_dir_label"))
         self._outputs_edit.setPlaceholderText(tr("invoke_setup.outputs_dir_placeholder"))
         self._outputs_browse_btn.setText(tr("invoke_setup.outputs_dir_browse"))
@@ -444,7 +452,10 @@ class InvokeSetupDialog(QDialog):
             self._table.setCellWidget(r, self._COL_DELETE, del_btn)
 
         # ベース
-        base_item = QTableWidgetItem(_base_label(base))
+        base_text = _base_label(base)
+        if base not in InvokeClient.KNOWN_TEMPLATE_BASES:
+            base_text += "（未検証）" if current_language() == "ja" else " (Unverified)"
+        base_item = QTableWidgetItem(base_text)
         base_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
         self._table.setItem(r, self._COL_BASE, base_item)
 
@@ -485,6 +496,7 @@ class InvokeSetupDialog(QDialog):
     def _fetch_for_base(self, base: str) -> None:
         if self._fetch_worker and self._fetch_worker.isRunning():
             return
+        self._set_capture_prompt(self._capture_guide(base))
         self._status_label.setText(tr("invoke_setup.fetching", base=_base_label(base)))
         self._fetch_worker = _FetchTemplateWorker(self._client, base, self)
         self._fetch_worker.ok.connect(self._on_fetch_ok)
@@ -514,20 +526,125 @@ class InvokeSetupDialog(QDialog):
             tr("invoke_setup.fetch_ok", name=saved.get("name", ""),
                base=_base_label(base))
         )
+        success = (
+            f"{_base_label(base)} の完全なテンプレートを取得しました。"
+            if current_language() == "ja"
+            else f"Fetched a complete {_base_label(base)} template."
+        )
+        self._set_capture_prompt(success, success=True)
         self._populate_table()
         self.setup_changed.emit()
 
-    def _on_fetch_mismatch(self, base: str) -> None:
-        label = _base_label(base)
-        QMessageBox.information(
-            self, tr("invoke_setup.no_template_title", base=label),
-            tr("invoke_setup.no_template_msg", base=label),
-        )
+    def _on_fetch_mismatch(self, expected_base: str, actual_base: str) -> None:
+        expected = _base_label(expected_base)
+        actual = _base_label(actual_base)
+        if current_language() == "ja":
+            text = (
+                f"{expected} のテンプレートを取得できませんでした。\n"
+                f"Invokeで {expected} モデルを使って通常のtxt2img画像を1枚生成し、"
+                "生成完了後にもう一度取得してください。\n\n"
+                f"詳細: 直近の生成は {actual} です。"
+            )
+        else:
+            text = (
+                f"Could not fetch a {expected} template.\n"
+                f"Generate one normal txt2img image in Invoke with a {expected} model, "
+                "then fetch again after it completes.\n\n"
+                f"Details: The latest generation uses {actual}."
+            )
+        self._set_capture_prompt(text, error=True)
         self._status_label.setText("")
 
-    def _on_fetch_ng(self, msg: str) -> None:
-        QMessageBox.warning(self, tr("invoke_setup.fetch_failed_title"), msg)
+    def _on_fetch_ng(self, error: object) -> None:
+        if isinstance(error, TemplateValidationError):
+            guide = self._capture_guide(error.base)
+            detail_key = "ja" if current_language() == "ja" else "en"
+            details = "\n".join(
+                f"・{issue.get(detail_key) or issue.get('en') or issue.get('code')}"
+                for issue in error.issues
+            )
+            if current_language() == "ja":
+                text = (
+                    "完全な生成テンプレートを取得できませんでした。\n"
+                    f"{guide}\n\n詳細:\n{details}"
+                )
+            else:
+                text = (
+                    "Could not fetch a complete generation template.\n"
+                    f"{guide}\n\nDetails:\n{details}"
+                )
+        else:
+            detail = str(error)
+            if current_language() == "ja":
+                text = (
+                    "テンプレートを取得できませんでした。Invokeが起動し、直近の画像生成が"
+                    "完了していることを確認して、もう一度取得してください。\n\n"
+                    f"詳細: {detail}"
+                )
+            else:
+                text = (
+                    "Could not fetch the template. Confirm that Invoke is running and the latest "
+                    "generation has completed, then fetch again.\n\n"
+                    f"Details: {detail}"
+                )
+        self._set_capture_prompt(text, error=True)
         self._status_label.setText("")
+
+    def _set_capture_prompt(
+        self, text: str, *, error: bool = False, success: bool = False,
+    ) -> None:
+        color = RED if error else GREEN if success else TEXT
+        border = RED if error else GREEN if success else ACCENT
+        self._capture_prompt.setText(text)
+        self._capture_prompt.setStyleSheet(
+            f"color: {color}; background: {SURFACE0}; border: 1px solid {border}; "
+            "border-radius: 4px; padding: 8px;"
+        )
+
+    @staticmethod
+    def _capture_guide(base: str) -> str:
+        label = _base_label(base) if base else ""
+        ja = current_language() == "ja"
+        common_ja = (
+            "ControlNet、IP-Adapter、参照画像、img2img、inpaint、Refinerなどは無効にし、"
+            "通常のtxt2img画像を1枚生成してください。生成完了後にこの画面で取得します。"
+        )
+        common_en = (
+            "Disable ControlNet, IP-Adapter, reference images, img2img, inpaint and refiners. "
+            "Generate one normal txt2img image, wait for completion, then fetch it here."
+        )
+        if not base:
+            return (
+                "取得するモデルに対応するLoRAを1つ以上有効にしてください。利用できる場合は"
+                "CFGを1より大きくし、空でないネガティブプロンプトを入力してください。\n"
+                + common_ja
+                if ja else
+                "Enable at least one LoRA compatible with the model. When available, set true CFG "
+                "above 1 and enter a non-empty negative prompt.\n" + common_en
+            )
+        if base in InvokeClient.NEGATIVE_CAPTURE_BASES:
+            return (
+                f"Invokeで{label}モデルと対応LoRAを1つ以上選び、CFGを4.0など1より大きい値にし、"
+                "空でないネガティブプロンプトを入力してください。\n" + common_ja
+                if ja else
+                f"In Invoke, select a {label} model and at least one compatible LoRA, set true CFG "
+                "above 1 (for example 4.0), and enter a non-empty negative prompt.\n" + common_en
+            )
+        if base in {"flux", "flux2"}:
+            return (
+                f"Invokeで{label}モデルと対応LoRAを1つ以上選び、通常CFGは1.0のままにしてください。\n"
+                + common_ja
+                if ja else
+                f"In Invoke, select a {label} model and at least one compatible LoRA, and keep true "
+                "CFG at 1.0.\n" + common_en
+            )
+        return (
+            f"Invokeで{label}モデルを選び、そのモデルで利用できるLoRA、CFG、"
+            "ネガティブプロンプトを有効にしてください。\n" + common_ja
+            if ja else
+            f"In Invoke, select a {label} model and enable the LoRA, CFG and negative-prompt "
+            "features available for that model.\n" + common_en
+        )
 
     def _delete_template(self, template_id: int, name: str) -> None:
         ret = QMessageBox.question(

@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QMenu, QWidgetAction, QDialog, QDialogButtonBox,
     QCompleter,
 )
-from PySide6.QtCore import Signal, Qt, QPoint, QEvent, QObject, QTimer, QStringListModel
+from PySide6.QtCore import Signal, Qt, QPoint, QRect, QEvent, QObject, QTimer, QStringListModel
 from PySide6.QtGui import QFont, QDragEnterEvent, QDragMoveEvent, QDragLeaveEvent, QDropEvent, QTextCursor, QAction, QCursor, QTextOption
 
 from core.prompt_builder import Block, TagTile, NaturalTextTile, GroupTile
@@ -28,6 +28,7 @@ import db.app_db as _app_db
 import db.library_db as _library_db
 from ui.flow_layout import FlowLayout
 from ui.tile_widget import TileWidget, TILE_MIME
+from ui.connection_drag import ConnectionCurveOverlay, ConnectionHandle
 from ui.styles import (
     BLOCK_HEADER_COLORS,
     SURFACE0, SURFACE1, SURFACE2, TEXT, SUBTEXT, ACCENT, GREEN, RED, ui_font, themed_button_style,
@@ -396,7 +397,10 @@ class BlockWidget(QFrame):
         self._from_input: bool = False               # 入力欄からの追加時のみ True（スクロールアンカー用）
         self._source_edit_warning_active: bool = False # textChanged 再入防止
         self._bulk_translate_available_callback = None
+        self._layout_settle_pending = False
         self._build_ui()
+        self._connection_overlay = ConnectionCurveOverlay(self)
+        self._connection_source_handle: ConnectionHandle | None = None
         self._refresh_tiles()
         self._load_collapsed_state()
         self._apply_readonly_state()
@@ -462,6 +466,18 @@ class BlockWidget(QFrame):
         self._shuffle_cb.setToolTip(tr("block.shuffle_tooltip"))
         self._shuffle_cb.stateChanged.connect(self._on_shuffle_changed)
         hdr_lay.addWidget(self._shuffle_cb)
+
+        self._add_connection_btn = QToolButton()
+        self._add_connection_btn.setText("🔗+")
+        self._add_connection_btn.setFixedSize(34, 20)
+        self._add_connection_btn.setToolTip(tr("connection.add_group"))
+        self._add_connection_btn.setStyleSheet(
+            f"QToolButton {{ background: transparent; color: {ACCENT}; "
+            f"border: 1px solid {ACCENT}; border-radius: 3px; padding: 0; }}"
+            f"QToolButton:hover {{ background: {SURFACE2}; }}"
+        )
+        self._add_connection_btn.clicked.connect(self._add_empty_connection_group)
+        hdr_lay.addWidget(self._add_connection_btn)
 
         self._lock_btn = QToolButton()
         self._lock_btn.setFixedSize(28, 20)
@@ -659,6 +675,7 @@ class BlockWidget(QFrame):
 
         self._flow.invalidate()
         self._update_tile_container_height()
+        self._schedule_layout_settle()
         self.updateGeometry()
 
     # ── 高さ管理 ────────────────────────────────────────
@@ -673,8 +690,35 @@ class BlockWidget(QFrame):
         h = max(36, self._flow.heightForWidth(w))
         self._tiles_container.setMinimumHeight(h)
 
+    def _schedule_layout_settle(self) -> None:
+        """子サイズ確定後に中央ペインのFlowLayout高さを取り直す。"""
+        if self._layout_settle_pending:
+            return
+        self._layout_settle_pending = True
+        QTimer.singleShot(0, self._settle_layout)
+
+    def _settle_layout(self) -> None:
+        self._layout_settle_pending = False
+        # 接続グループは内部キャンバスを先に確定し、その後で親FlowLayoutを測る。
+        for widget in self._tile_widgets:
+            if bool(widget.property("flow_full_row")):
+                if hasattr(widget, "_update_stable_width"):
+                    widget._update_stable_width()
+                if getattr(widget, "_expanded", False) and hasattr(widget, "_update_inner_height"):
+                    widget._update_inner_height()
+                widget.updateGeometry()
+        self._flow.invalidate()
+        self._flow.activate()
+        self._update_tile_container_height()
+        self.updateGeometry()
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        if hasattr(self, "_connection_overlay"):
+            self._connection_overlay.setGeometry(self.rect())
+        for widget in getattr(self, "_tile_widgets", []):
+            if bool(widget.property("flow_full_row")) and hasattr(widget, "_update_stable_width"):
+                widget._update_stable_width()
         self._update_tile_container_height()
         self.updateGeometry()
         if hasattr(self, "_lock_overlay") and self._locked:
@@ -938,6 +982,12 @@ class BlockWidget(QFrame):
             target_tile = target_tw.tile
             group_to_group = isinstance(dragged, GroupTile) and isinstance(target_tile, GroupTile)
             if shift_down and (group_to_group or self._is_drop_on_label(target_tw, pos_in_tile)):
+                if group_to_group and (
+                    dragged.group_type == "connection" or target_tile.group_type == "connection"
+                ):
+                    QToolTip.showText(QCursor.pos(), tr("connection.invalid"), self)
+                    event.ignore()
+                    return
                 # 同一タイルへのドロップは無視
                 if dragged is not target_tile:
                     # ターゲットが既に GroupTile → そこへ追加
@@ -1104,10 +1154,23 @@ class BlockWidget(QFrame):
             )
             source_group_idx = (
                 self._index_by_identity(source_bw.block.tiles, source_group.tile)
-                if source_bw is not self and source_group is not None
+                if source_group is not None
                 else -1
             )
             self._remove_tile_from_block_or_group(src_widget, source_bw)
+            if source_bw is self and source_group is not None and source_group_idx < 0:
+                # 接続グループ内の入れ子から同じ中央ブロックへ取り出す経路。
+                # ブロック全体を再構築すると、未確定のsizeHintで全接続グループの
+                # 高さが固定されるため、移動元と追加分だけを更新する。
+                self.block.tiles.insert(drop_idx, dragged)
+                source_group._refresh_sub_tiles()
+                source_group.tile_changed.emit()
+                self._insert_tile_widget(drop_idx, dragged)
+                self._schedule_layout_settle()
+                tile_drag.clear_drag()
+                self.block_changed.emit()
+                event.acceptProposedAction()
+                return
             if source_bw is self and source_group is not None and source_group_idx >= 0:
                 remaining = len(source_group.tile.tiles)
                 if remaining >= 2:
@@ -1321,6 +1384,211 @@ class BlockWidget(QFrame):
             return NaturalTextTile.from_dict(tile.to_dict())
         return tile
 
+    # ── 接続ハンドル ────────────────────────────────────
+
+    def _locate_connection_tile(self, target):
+        """Return (list, parent_group, index) for a tile identity in this block."""
+        def _walk(items: list, parent_group: GroupTile | None):
+            for index, item in enumerate(items):
+                if item is target:
+                    return items, parent_group, index
+                if isinstance(item, GroupTile):
+                    found = _walk(item.tiles, item)
+                    if found is not None:
+                        return found
+            return None
+
+        return _walk(self.block.tiles, None)
+
+    @staticmethod
+    def _connection_owner_is_container(owner: QWidget) -> bool:
+        tile = getattr(owner, "tile", None)
+        return isinstance(tile, GroupTile) and tile.group_type == "connection"
+
+    def _can_connect_owners(self, source: QWidget, target: QWidget) -> bool:
+        if source is target or self._readonly or self._locked:
+            return False
+        if self._connection_owner_is_container(source):
+            return False
+        source_loc = self._locate_connection_tile(getattr(source, "tile", None))
+        target_loc = self._locate_connection_tile(getattr(target, "tile", None))
+        if source_loc is None or target_loc is None:
+            return False
+        if self._connection_owner_is_container(target):
+            return target_loc[1] is None
+        # 接続対象はトップレベル、または接続列の直接要素。通常グループの
+        # 内部を外側から線で貫く曖昧な接続は許可しない。
+        return all(
+            parent is None or parent.group_type == "connection"
+            for parent in (source_loc[1], target_loc[1])
+        )
+
+    @staticmethod
+    def _handle_global_rect(handle: ConnectionHandle) -> QRect:
+        top_left = handle.mapToGlobal(QPoint(0, 0))
+        return QRect(top_left, handle.size()).adjusted(-4, -4, 4, 4)
+
+    def _connection_target_at(self, source_handle: ConnectionHandle, global_pos: QPoint):
+        for handle in self.findChildren(ConnectionHandle):
+            if handle is source_handle or not handle.isEnabled() or not handle.isVisibleTo(self):
+                continue
+            if self._handle_global_rect(handle).contains(global_pos):
+                after = global_pos.x() >= handle.mapToGlobal(QPoint(handle.width() // 2, 0)).x()
+                return handle, handle.owner, after, self._can_connect_owners(source_handle.owner, handle.owner)
+        return None, None, False, False
+
+    def _start_connection_drag(self, source: QWidget, source_handle: ConnectionHandle) -> None:
+        self._connection_source_handle = source_handle
+        self._clear_connection_targets(keep_overlay=True)
+        start = self.mapFromGlobal(source_handle.mapToGlobal(source_handle.rect().center()))
+        self._connection_overlay.show_curve(start, start, valid=True)
+
+    def _update_connection_drag(
+        self,
+        source: QWidget,
+        source_handle: ConnectionHandle,
+        global_pos: QPoint,
+    ) -> None:
+        self._clear_connection_targets(keep_overlay=True)
+        target_handle, target, after, valid = self._connection_target_at(source_handle, global_pos)
+        end_global = global_pos
+        label = ""
+        if target_handle is not None:
+            target_handle.set_drop_state("valid" if valid else "invalid", after=after)
+            edge_x = target_handle.width() if after else 0
+            end_global = target_handle.mapToGlobal(QPoint(edge_x, target_handle.height() // 2))
+            label = tr("connection.insert_after" if after else "connection.insert_before") if valid else tr("connection.invalid")
+            if valid:
+                if self._connection_owner_is_container(target):
+                    target.show_connection_insert_marker(
+                        len(target.tile.tiles) if after else 0
+                    )
+                    target_loc = None
+                else:
+                    target_loc = self._locate_connection_tile(getattr(target, "tile", None))
+                if target_loc is not None and isinstance(target_loc[1], GroupTile):
+                    group_widget = self.find_widget_for_tile(target_loc[1])
+                    if hasattr(group_widget, "show_connection_insert_marker"):
+                        group_widget.show_connection_insert_marker(target_loc[2] + (1 if after else 0))
+        start = self.mapFromGlobal(source_handle.mapToGlobal(source_handle.rect().center()))
+        end = self.mapFromGlobal(end_global)
+        self._connection_overlay.show_curve(start, end, valid=valid or target_handle is None, label=label)
+
+    def _finish_connection_drag(
+        self,
+        source: QWidget,
+        source_handle: ConnectionHandle,
+        global_pos: QPoint,
+    ) -> None:
+        target_handle, target, after, valid = self._connection_target_at(source_handle, global_pos)
+        self._clear_connection_targets()
+        self._connection_source_handle = None
+        if target_handle is None or target is None or not valid:
+            return
+        self._connect_owner_tiles(source, target, after=after)
+
+    def _clear_connection_targets(self, *, keep_overlay: bool = False) -> None:
+        for handle in self.findChildren(ConnectionHandle):
+            handle.set_drop_state("normal")
+        from ui.group_widget import GroupWidget
+        for group_widget in self.findChildren(GroupWidget):
+            if hasattr(group_widget, "hide_connection_insert_marker"):
+                group_widget.hide_connection_insert_marker()
+        if not keep_overlay and hasattr(self, "_connection_overlay"):
+            self._connection_overlay.clear()
+
+    def _connect_owner_tiles(self, source: QWidget, target: QWidget, *, after: bool) -> None:
+        source_tile = getattr(source, "tile", None)
+        target_tile = getattr(target, "tile", None)
+        if not self._can_connect_owners(source, target):
+            return
+        source_loc = self._locate_connection_tile(source_tile)
+        target_loc = self._locate_connection_tile(target_tile)
+        if source_loc is None or target_loc is None:
+            return
+
+        source_items = source_loc[0]
+        source_items.pop(source_loc[2])
+        target_loc = self._locate_connection_tile(target_tile)
+        if target_loc is None:
+            return
+        target_items, target_parent, target_index = target_loc
+
+        if self._connection_owner_is_container(target):
+            target_tile.tiles.insert(len(target_tile.tiles) if after else 0, source_tile)
+            self._refresh_tiles()
+            self._on_group_geometry_changed()
+            self.block_changed.emit()
+            return
+
+        if isinstance(target_parent, GroupTile) and target_parent.group_type == "connection":
+            target_items.insert(target_index + (1 if after else 0), source_tile)
+        else:
+            connection_name = tr("connection.default_name", name=_tile_short_name(target_tile) or _tile_short_name(source_tile))
+            connection = GroupTile(name=connection_name, group_type="connection")
+            connection.ui_expanded = True
+            connection.tiles = [target_tile, source_tile] if after else [source_tile, target_tile]
+            target_items[target_index] = connection
+
+        self._refresh_tiles()
+        self._on_group_geometry_changed()
+        self.block_changed.emit()
+
+    def _show_connection_menu(self, owner: QWidget, global_pos: QPoint) -> None:
+        tile = getattr(owner, "tile", None)
+        loc = self._locate_connection_tile(tile)
+        if loc is None or not isinstance(loc[1], GroupTile) or loc[1].group_type != "connection":
+            return
+        parent_group = loc[1]
+        index = loc[2]
+        menu = QMenu(self)
+        detach = QAction(tr("connection.detach"), menu)
+        detach.triggered.connect(lambda: self._detach_connection_tile(tile, parent_group))
+        menu.addAction(detach)
+        menu.addSeparator()
+        split_before = QAction(tr("connection.split_before"), menu)
+        split_before.setEnabled(index > 0)
+        split_before.triggered.connect(lambda: self._split_connection_group(parent_group, index))
+        menu.addAction(split_before)
+        split_after = QAction(tr("connection.split_after"), menu)
+        split_after.setEnabled(index < len(parent_group.tiles) - 1)
+        split_after.triggered.connect(lambda: self._split_connection_group(parent_group, index + 1))
+        menu.addAction(split_after)
+        menu.exec(global_pos)
+
+    def _detach_connection_tile(self, tile, connection: GroupTile) -> None:
+        index = self._index_by_identity(connection.tiles, tile)
+        if index < 0:
+            return
+        connection.tiles.pop(index)
+        top_index = self._index_by_identity(self.block.tiles, connection)
+        if top_index >= 0:
+            self.block.tiles.insert(top_index + 1, tile)
+        else:
+            self.block.tiles.append(tile)
+        self._refresh_tiles()
+        self.block_changed.emit()
+
+    def _split_connection_group(self, connection: GroupTile, boundary: int) -> None:
+        if not (0 < boundary < len(connection.tiles)):
+            return
+        top_index = self._index_by_identity(self.block.tiles, connection)
+        if top_index < 0:
+            return
+        right = GroupTile(
+            name=tr("connection.split_name", name=connection.name),
+            group_type="connection",
+            enabled=connection.enabled,
+            strength_level=connection.strength_level,
+        )
+        right.ui_expanded = connection.ui_expanded
+        right.ui_width = connection.ui_width
+        right.tiles = connection.tiles[boundary:]
+        connection.tiles = connection.tiles[:boundary]
+        self.block.tiles.insert(top_index + 1, right)
+        self._refresh_tiles()
+        self.block_changed.emit()
+
     # ── スロット ────────────────────────────────────────
 
     def _on_shuffle_changed(self, state: int) -> None:
@@ -1364,7 +1632,18 @@ class BlockWidget(QFrame):
             self._input_editor_btn.setEnabled(not locked)
         if hasattr(self, "_mode_btn"):
             self._mode_btn.setEnabled(not locked)
+        if hasattr(self, "_add_connection_btn"):
+            self._add_connection_btn.setEnabled(not locked)
         self._update_input_button_states()
+
+    def _add_empty_connection_group(self) -> None:
+        if self._readonly or self._locked:
+            return
+        group = GroupTile(name=tr("connection.empty_name"), group_type="connection")
+        group.ui_expanded = True
+        self.block.tiles.append(group)
+        self._refresh_tiles()
+        self.block_changed.emit()
 
     def _open_input_editor(self) -> None:
         if self._readonly or self._locked:
@@ -1496,7 +1775,7 @@ class BlockWidget(QFrame):
             return
         self.setAcceptDrops(False)
         for widget_name in (
-            "_shuffle_cb", "_lock_btn", "_input_bar",
+            "_shuffle_cb", "_lock_btn", "_add_connection_btn", "_input_bar",
             "_translate_result_area", "_translate_panel",
         ):
             widget = getattr(self, widget_name, None)
@@ -1871,7 +2150,12 @@ class BlockWidget(QFrame):
         sender = self.sender()
         if isinstance(sender, QWidget) and hasattr(sender, "tile"):
             idx = self._index_widget_by_identity(sender)
-            if idx >= 0 and isinstance(sender.tile, GroupTile) and len(sender.tile.tiles) <= 1:
+            if (
+                idx >= 0
+                and isinstance(sender.tile, GroupTile)
+                and sender.tile.group_type != "connection"
+                and len(sender.tile.tiles) <= 1
+            ):
                 self._sync_group_widget_after_child_removed(idx, sender)
                 self._on_group_geometry_changed()
                 self.block_changed.emit()
@@ -1888,7 +2172,9 @@ class BlockWidget(QFrame):
         new_tiles: list = []
         for tile in self.block.tiles:
             if isinstance(tile, GroupTile):
-                if len(tile.tiles) == 0:
+                if tile.group_type == "connection":
+                    new_tiles.append(tile)
+                elif len(tile.tiles) == 0:
                     changed = True
                 elif len(tile.tiles) == 1:
                     new_tiles.append(tile.tiles[0])
@@ -1905,6 +2191,7 @@ class BlockWidget(QFrame):
         """GroupWidget の展開/折りたたみでブロックの最低高さを再計算する"""
         self._flow.invalidate()
         self._update_tile_container_height()
+        self._schedule_layout_settle()
         self.updateGeometry()
         if hasattr(self, "_lock_overlay") and self._locked:
             self._update_lock_overlay_geometry()
@@ -1920,6 +2207,14 @@ class BlockWidget(QFrame):
         self._flow.invalidate()
         self._update_tile_container_height()
         self.updateGeometry()
+
+    def refresh_tile_states(self) -> None:
+        """構成とグループ寸法を維持したままON/OFF表示だけ更新する。"""
+        for widget in self._tile_widgets:
+            if hasattr(widget, "refresh_tile_states"):
+                widget.refresh_tile_states()
+            elif hasattr(widget, "refresh"):
+                widget.refresh()
 
     def refresh_tile_display(self) -> None:
         """タイルの1段/2段表示切替を即時反映する。"""
@@ -1986,6 +2281,7 @@ class BlockWidget(QFrame):
             w.tile_changed.connect(self._on_group_tile_changed)
             w.geometry_changed.connect(self._on_group_geometry_changed)
             w.move_requested.connect(self._on_tile_move_requested)
+            w.copy_requested.connect(self._on_group_copy_requested)
             return w
 
         w = TileWidget(tile, parent=self._tiles_container, readonly=self._readonly)
@@ -2014,6 +2310,52 @@ class BlockWidget(QFrame):
         self._move_tile_widget(idx, new_idx)
         self.block_changed.emit()
 
+    def _on_group_copy_requested(self, source: QWidget) -> None:
+        if self._readonly or self._locked or not isinstance(getattr(source, "tile", None), GroupTile):
+            return
+        top_widget = source
+        while top_widget not in self._tile_widgets and top_widget.parentWidget() is not None:
+            top_widget = top_widget.parentWidget()
+        try:
+            top_index = self._tile_widgets.index(top_widget)
+        except ValueError:
+            top_index = len(self.block.tiles) - 1
+
+        clone = GroupTile.from_dict(source.tile.to_dict(include_ui_state=True))
+        base_name = source.tile.name
+        existing = {
+            tile.name for tile in self.block.tiles if isinstance(tile, GroupTile)
+        }
+        candidate = tr("group.copy_name", name=base_name)
+        suffix = 2
+        while candidate in existing:
+            candidate = tr("group.copy_name_numbered", name=base_name, number=suffix)
+            suffix += 1
+        clone.name = candidate
+        if clone.group_type == "connection":
+            # 比較用の複製でプロンプトが即座に二重にならないよう、出力だけOFF。
+            clone.enabled = False
+
+        insert_at = max(0, min(top_index + 1, len(self.block.tiles)))
+        self.block.tiles.insert(insert_at, clone)
+        self._refresh_tiles()
+        self.block_changed.emit()
+
+        def _reveal_copy() -> None:
+            if not (0 <= insert_at < len(self._tile_widgets)):
+                return
+            copied_widget = self._tile_widgets[insert_at]
+            if hasattr(copied_widget, "play_copy_hint"):
+                copied_widget.play_copy_hint()
+            ancestor = self.parentWidget()
+            while ancestor is not None:
+                if hasattr(ancestor, "verticalScrollBar") and hasattr(ancestor, "ensureWidgetVisible"):
+                    ancestor.ensureWidgetVisible(copied_widget, 0, 24)
+                    break
+                ancestor = ancestor.parentWidget()
+
+        QTimer.singleShot(0, _reveal_copy)
+
     def _insert_tile_widget(self, index: int, tile) -> None:
         w = self._make_tile_widget(tile)
         self._flow.insertWidget(index, w)
@@ -2021,6 +2363,7 @@ class BlockWidget(QFrame):
         w.show()
         self._flow.invalidate()
         self._update_tile_container_height()
+        self._schedule_layout_settle()
         self.updateGeometry()
         self.layout_changed.emit()
 
@@ -2036,6 +2379,7 @@ class BlockWidget(QFrame):
         w.deleteLater()
         self._flow.invalidate()
         self._update_tile_container_height()
+        self._schedule_layout_settle()
         self.updateGeometry()
         self.layout_changed.emit()
 
@@ -2058,6 +2402,7 @@ class BlockWidget(QFrame):
         self._tile_widgets.insert(dest_index, widget)
         self._flow.invalidate()
         self._update_tile_container_height()
+        self._schedule_layout_settle()
         self.updateGeometry()
         self.layout_changed.emit()
 
@@ -2069,6 +2414,11 @@ class BlockWidget(QFrame):
 
     def _sync_group_widget_after_child_removed(self, index: int, group_widget) -> None:
         remaining = len(group_widget.tile.tiles)
+        if getattr(group_widget.tile, "group_type", "normal") == "connection":
+            group_widget._refresh_sub_tiles()
+            group_widget._update_inner_height()
+            self._on_group_geometry_changed()
+            return
         if remaining >= 2:
             group_widget._refresh_sub_tiles()
             group_widget._update_inner_height()

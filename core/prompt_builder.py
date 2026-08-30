@@ -267,6 +267,9 @@ class GroupTile:
     enabled: bool = True
     strength_level: int = 0
     edit_locked: bool = False
+    # "normal" は従来のカンマ区切りグループ、"connection" は
+    # 左から右へ半角スペース1文字で結合する接続グループ。
+    group_type: str = "normal"
     # LoRA トリガーワードグループの連動キー（TagTile.lora_source_key と同様）
     lora_source_key: str = field(default="", init=False, repr=False)
     # UI の展開/折りたたみ状態（_refresh_tiles 再構築後も復元するために保持）
@@ -283,6 +286,11 @@ class GroupTile:
 
     def __post_init__(self) -> None:
         self.name = single_line_text(self.name)
+        if self.group_type not in ("normal", "connection"):
+            self.group_type = "normal"
+        if self.group_type == "connection":
+            # 接続グループ自身は全要素を順に評価する。選択は子グループが担当する。
+            self.mode = "none"
         if not self.name:
             GroupTile._grp_counter += 1
             self.name = f"Grp{GroupTile._grp_counter}"
@@ -293,7 +301,9 @@ class GroupTile:
         active = [t for t in self.tiles if getattr(t, "enabled", True)]
         if not active:
             return ""
-        if self.mode == "random":
+        if self.group_type == "connection":
+            selected = active
+        elif self.mode == "random":
             n = min(self.count, len(active))
             selected = random.sample(active, n)
         elif self.mode == "sequential":
@@ -314,7 +324,8 @@ class GroupTile:
                 i for i, t in enumerate(self.tiles) if id(t) in sel_ids
             ]
         parts = [t.compile() for t in selected]
-        text = ", ".join(p for p in parts if p)
+        joiner = " " if self.group_type == "connection" else ", "
+        text = joiner.join(p for p in parts if p)
         if text and self.strength_level != 0:
             suffix = "+" * self.strength_level if self.strength_level > 0 else "-" * abs(self.strength_level)
             return f"({text}){suffix}"
@@ -335,7 +346,9 @@ class GroupTile:
             active = [t for t in self.tiles if getattr(t, "enabled", True)]
             if not active:
                 return ""
-            if self.mode == "random":
+            if self.group_type == "connection":
+                selected = active
+            elif self.mode == "random":
                 n = min(self.count, len(active))
                 selected = random.sample(active, n)
             elif self.mode == "sequential":
@@ -353,7 +366,8 @@ class GroupTile:
             _tile_local_text(t, include_disabled=include_disabled, separator=separator)
             for t in selected
         ]
-        text = separator.join(p for p in parts if p)
+        joiner = " " if self.group_type == "connection" else separator
+        text = joiner.join(p for p in parts if p)
         if include_disabled and not self.enabled and text:
             return f"//{text}//"
         return text
@@ -379,6 +393,29 @@ class GroupTile:
                 changed = True
         return changed
 
+    def restore_selection_candidates_recursive(self) -> bool:
+        """配下の選択型グループで候補タイルを再帰的にすべて ON にする。
+
+        random/sequential グループの直下は GroupTile を含めて選択候補なので
+        ON に戻す。一方、モードや接続グループ自身の出力 ON/OFF は変更しない。
+        親のモードにかかわらず全階層を探索する。
+        """
+        changed = False
+
+        def _walk(group: "GroupTile") -> None:
+            nonlocal changed
+            if group.mode in ("random", "sequential"):
+                for child in group.tiles:
+                    if not getattr(child, "enabled", True):
+                        child.enabled = True
+                        changed = True
+            for child in group.tiles:
+                if isinstance(child, GroupTile):
+                    _walk(child)
+
+        _walk(self)
+        return changed
+
     def to_dict(self, *, include_ui_state: bool = True) -> dict:
         data = {
             "tile_type":       "group",
@@ -392,6 +429,7 @@ class GroupTile:
             "enabled":         self.enabled,
             "strength_level":  self.strength_level,
             "edit_locked":     self.edit_locked,
+            "group_type":      self.group_type,
             "lora_source_key": self.lora_source_key,
             # 横幅は折りたたみ状態と違い、グループ固有の表示設定として常に保存する。
             "ui_width":        self.ui_width,
@@ -415,6 +453,7 @@ class GroupTile:
             enabled = bool(d.get("enabled", True)),
             strength_level = int(d.get("strength_level", 0)),
             edit_locked = bool(d.get("edit_locked", False)),
+            group_type = d.get("group_type", "normal"),
         )
         gt.lora_source_key = d.get("lora_source_key", "")
         gt.ui_expanded     = bool(d.get("ui_expanded", False)) if restore_ui_state else False

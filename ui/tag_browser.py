@@ -2211,6 +2211,9 @@ class TagBrowser(QWidget):
                         if row["category"]:
                             tw.tile.category = row["category"]
                     tw.refresh()
+                    # 操作したタイルだけでなく、別の接続グループ内にある
+                    # 同名タイルも登録済み表示へ即時更新する。
+                    self.tag_categories_changed.emit()
             event.acceptProposedAction()
         else:
             event.ignore()

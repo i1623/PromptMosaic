@@ -14,7 +14,14 @@ sys.modules.setdefault("httpx", types.ModuleType("httpx"))
 
 from api.invoke_client import InvokeClient
 from core.prompt_builder import GroupTile, NaturalTextTile, PromptDocument, TagTile
-from core.prompt_pack import PromptPackError, portable_document, read_prompt_pack, write_prompt_pack
+from core.prompt_pack import (
+    PACK_VERSION,
+    PromptPackError,
+    _digest,
+    portable_document,
+    read_prompt_pack,
+    write_prompt_pack,
+)
 
 
 class PromptPackTests(unittest.TestCase):
@@ -53,6 +60,78 @@ class PromptPackTests(unittest.TestCase):
         self.assertEqual(preset.ui_width, 640)
         self.assertFalse(preset.ui_expanded)
 
+    def test_legacy_group_without_group_type_remains_comma_joined(self) -> None:
+        legacy = GroupTile(
+            name="Legacy",
+            tiles=[TagTile("red"), TagTile("sneakers")],
+        ).to_dict()
+        legacy.pop("group_type")
+        restored = GroupTile.from_dict(legacy)
+        self.assertEqual(restored.group_type, "normal")
+        self.assertEqual(restored.compile(), "red, sneakers")
+
+    def test_connection_group_joins_active_fragments_with_one_space(self) -> None:
+        colors = GroupTile(
+            name="Colors",
+            mode="sequential",
+            tiles=[TagTile("red"), TagTile("blue")],
+        )
+        connection = GroupTile(
+            name="Shoes",
+            group_type="connection",
+            tiles=[colors, TagTile("sneakers"), TagTile("unused", enabled=False)],
+        )
+        self.assertEqual(connection.compile(), "red sneakers")
+        connection.enabled = False
+        self.assertEqual(connection.compile(), "")
+        self.assertEqual(colors._seq_idx, 1)
+
+    def test_connection_group_is_one_comma_delimited_block_fragment(self) -> None:
+        doc = PromptDocument()
+        block = doc.positive.middle
+        block.tiles.extend(
+            [
+                TagTile("masterpiece"),
+                GroupTile(
+                    name="Shoes",
+                    group_type="connection",
+                    tiles=[TagTile("red"), TagTile("sneakers")],
+                ),
+                TagTile("standing"),
+            ]
+        )
+        self.assertEqual(doc.compile_positive(), "masterpiece, red sneakers, standing")
+
+    def test_connection_group_roundtrip_and_recursive_candidate_restore(self) -> None:
+        nested_random = GroupTile(
+            name="Nested random",
+            mode="random",
+            enabled=False,
+            tiles=[TagTile("leather", enabled=False), TagTile("canvas")],
+        )
+        sequential = GroupTile(
+            name="Sequence",
+            mode="sequential",
+            tiles=[TagTile("new", enabled=False), nested_random],
+        )
+        ordinary = GroupTile(name="Wrapper", tiles=[sequential])
+        connection = GroupTile(
+            name="Connected",
+            group_type="connection",
+            tiles=[ordinary, TagTile("shoes")],
+        )
+
+        self.assertTrue(connection.restore_selection_candidates_recursive())
+        self.assertTrue(sequential.tiles[0].enabled)
+        self.assertTrue(nested_random.enabled)
+        self.assertTrue(nested_random.tiles[0].enabled)
+        self.assertEqual(ordinary.mode, "none")
+        self.assertEqual(connection.group_type, "connection")
+
+        restored = GroupTile.from_dict(connection.to_dict())
+        self.assertEqual(restored.group_type, "connection")
+        self.assertEqual(restored.compile(), "new shoes")
+
     def test_portable_document_removes_install_specific_lora_keys(self) -> None:
         doc = self._document()
         group = doc.positive.middle.tiles[0]
@@ -81,14 +160,34 @@ class PromptPackTests(unittest.TestCase):
             self.assertEqual(read_prompt_pack(path), payload)
 
             data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(data["format_version"], PACK_VERSION)
             data["payload"]["memo"] = "tampered"
             path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
             with self.assertRaises(PromptPackError):
                 read_prompt_pack(path)
 
-    def test_anima_metadata_negative_prompt_is_supported(self) -> None:
-        # 公開版のdataは生成テンプレートを同梱しないため、
-        # 現行Animaと同じ core_metadata.negative_prompt 形式を最小構成で再現する。
+    def test_pack_v1_is_still_accepted(self) -> None:
+        payload = {
+            "unit": "single_image",
+            "document": self._document().to_dict(),
+            "memo": "legacy",
+            "generation": {},
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = write_prompt_pack(
+                Path(temp_dir) / "legacy.promptmosaic-pack",
+                payload,
+                app_version="legacy",
+            )
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data["format_version"] = 1
+            body = {key: value for key, value in data.items() if key != "sha256"}
+            data["sha256"] = _digest(body)
+            path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            self.assertEqual(read_prompt_pack(path), payload)
+
+    def test_metadata_only_does_not_claim_negative_prompt_support(self) -> None:
+        # metadataへの記録欄だけでは、負条件がdenoiseへ届く保証にならない。
         graph = {
             "nodes": {
                 "positive_prompt:test": {"type": "string", "value": ""},
@@ -100,7 +199,7 @@ class PromptPackTests(unittest.TestCase):
                 },
             }
         }
-        self.assertTrue(InvokeClient._graph_supports_negative_prompt(graph))
+        self.assertFalse(InvokeClient._graph_supports_negative_prompt(graph))
         self.assertTrue(
             InvokeClient._patch_nodes(
                 graph["nodes"],

@@ -38,6 +38,7 @@ def initialize_all() -> None:
     _load_active_selections()
     _ensure_blob_columns()
     _ensure_template_columns()
+    _ensure_template_capture_version()
     _rebuild_caches()
 
 
@@ -169,6 +170,38 @@ def _ensure_template_columns() -> None:
     if "encoder_name" not in existing:
         conn.execute("ALTER TABLE templates ADD COLUMN encoder_name TEXT DEFAULT ''")
     conn.commit()
+
+
+_TEMPLATE_CAPTURE_VERSION = "2"
+
+
+def _upgrade_template_capture_version(conn, target_version: str) -> bool:
+    """旧方式のテンプレート登録を外し、完全テンプレートの再取得を必須にする。
+
+    キャッシュJSON自体は削除しないため、必要なら手動調査・復旧に利用できる。
+    戻り値はテンプレート行を無効化したかどうか。
+    """
+    row = conn.execute(
+        "SELECT value FROM env_settings WHERE key='template_capture_version'"
+    ).fetchone()
+    if row and str(row["value"] or "") == target_version:
+        return False
+    had_templates = conn.execute("SELECT 1 FROM templates LIMIT 1").fetchone() is not None
+    conn.execute("DELETE FROM templates")
+    conn.execute(
+        "INSERT OR REPLACE INTO env_settings (key, value, updated_at) "
+        "VALUES ('template_capture_version', ?, CURRENT_TIMESTAMP)",
+        (target_version,),
+    )
+    conn.commit()
+    return had_templates
+
+
+def _ensure_template_capture_version() -> None:
+    """v2未満のテンプレートを登録解除し、全ベースで再取得させる。"""
+    _upgrade_template_capture_version(
+        connections.get_environment_conn(), _TEMPLATE_CAPTURE_VERSION
+    )
 
 
 def _rebuild_caches() -> None:

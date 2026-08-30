@@ -149,8 +149,8 @@ A generation template is the actual txt2img workflow graph saved from Invoke. Pr
 
 For each base model you want to use:
 
-1. In Invoke, generate one txt2img image with that base model.
-2. If you plan to use LoRA, include at least one LoRA in that generation. PromptMosaic uses the LoRA path in the workflow as a reusable route.
+1. In Invoke, generate one standard txt2img image with that base model.
+2. Include at least one compatible LoRA. For models that support true CFG and negative prompts, set CFG above 1 and enter a non-empty negative prompt. Disable ControlNet, IP-Adapter, reference images, img2img, inpaint and refiners.
 3. In PromptMosaic, fetch and save the template from the wizard.
 
 ![Template name dialog](images/invoke_setup_template_name.png)
@@ -161,7 +161,7 @@ After one template is fetched, its name appears in the row. Fetch only the base 
 
 If the current base model has no template, generation is disabled until a template is available.
 
-When the templates you need are listed, setup is complete for those base models. You can register multiple templates for different VAE, refiner, text encoder, or other settings.
+When the templates you need are listed, setup is complete for those base models. Multiple valid templates can be registered for one base and distinguished by name. If fetching fails, follow the instructions in the prompt area; technical validation details appear below them.
 
 ![Multiple templates fetched](images/invoke_setup_templates_complete.png)
 
