@@ -865,6 +865,9 @@ class MainWindow(QMainWindow):
         self._history_map_view_root: tuple[str, int] | None = self._settings_node_key("history_map_view_root")
         self._generation_busy = False
         self._generation_progress: QProgressDialog | None = None
+        # 生成中だけ中央ペインへ反映する random/sequential の選択状態を、
+        # タスク開始前の ON/OFF へ戻すための退避領域。
+        self._generation_selection_snapshot: dict[int, list[bool]] | None = None
 
         # 左右ペインの表示状態
         self._left_visible  = True
@@ -2934,6 +2937,7 @@ class MainWindow(QMainWindow):
 
     def _on_send_queue_done(self) -> None:
         self._close_send_progress()
+        self._restore_generation_selection_state()
         self._set_generation_busy(False)
         self._btn_gen.setText(tr("main.btn_generate"))
         self._show_status(tr("main.status_generate_ok", count=self._plan_sent_images))
@@ -2967,6 +2971,7 @@ class MainWindow(QMainWindow):
         )
         if not has_residue:
             self._close_send_progress()
+            self._restore_generation_selection_state()
             return
 
         self._close_send_progress()
@@ -3000,6 +3005,7 @@ class MainWindow(QMainWindow):
             self._cancel_worker.start()
 
         self._set_generation_busy(False)
+        self._restore_generation_selection_state()
         self._btn_gen.setText(tr("main.btn_generate"))
         self._btn_cancel_plan.setEnabled(False)
         self._refresh_lineage_card()
@@ -6831,13 +6837,18 @@ class MainWindow(QMainWindow):
     def _apply_selection_to_live_doc(self, first_sel: dict[int, list]) -> None:
         """
         生成1枚目の選択状態（random/sequential グループの選択タイルのみON）を
-        中央ペインのドキュメントに反映する。継承権者カード＝右ペインの履歴行と
-        同じ状態になる。構成とグループ寸法は維持して表示だけ更新し、
-        UNDO で生成前の状態に戻せる。
+        送信中の中央ペインへ一時的に反映する。構成とグループ寸法は維持し、
+        送信終了時に _restore_generation_selection_state() が生成前のON/OFFへ戻す。
         """
         if not first_sel:
             return
         doc = self._editor.document
+        if self._generation_selection_snapshot is None:
+            self._generation_selection_snapshot = {
+                id(g): [bool(getattr(t, "enabled", True)) for t in g.tiles]
+                for g in doc._all_group_tiles()
+                if g.mode in ("random", "sequential")
+            }
         changed = False
         for g in doc._all_group_tiles():
             sel = first_sel.get(id(g))
@@ -6850,7 +6861,31 @@ class MainWindow(QMainWindow):
                     t.enabled = new_state
                     changed = True
         if changed:
-            self._editor.refresh_tile_states_from_document()
+            self._editor.refresh_tile_states_from_document(record_undo=False)
+
+    def _restore_generation_selection_state(self) -> None:
+        """生成前の random/sequential 候補の ON/OFF を中央ペインへ戻す。
+
+        ☑☑ の ALL リセットとは別の一時復元であり、開始時から OFF だった候補も
+        OFF のまま再現する。入れ子・接続グループ配下も _all_group_tiles() により
+        再帰的に対象となる。シーケンシャルの進行位置は変更しない。
+        """
+        snapshot = self._generation_selection_snapshot
+        self._generation_selection_snapshot = None
+        if not snapshot or not hasattr(self, "_editor"):
+            return
+
+        changed = False
+        for group in self._editor.document._all_group_tiles():
+            states = snapshot.get(id(group))
+            if states is None or len(states) != len(group.tiles):
+                continue
+            for tile, enabled in zip(group.tiles, states):
+                if bool(getattr(tile, "enabled", True)) != enabled:
+                    tile.enabled = enabled
+                    changed = True
+        if changed:
+            self._editor.refresh_tile_states_from_document(record_undo=False)
 
     def _apply_model_default_params(self, invoke_key: str) -> None:
         """モデル注釈のデフォルト値(default_steps/cfg/scheduler)が設定されていれば
@@ -7687,6 +7722,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(msg, 5000)
 
     def closeEvent(self, event) -> None:
+        # 送信中に閉じても、生成時の一時選択状態を次回起動用設定へ保存しない。
+        self._restore_generation_selection_state()
         if self._translate_worker and self._translate_worker.isRunning():
             self._translate_worker.cancel_and_wait()
         self._translate_worker = None

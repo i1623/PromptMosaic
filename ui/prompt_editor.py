@@ -1452,12 +1452,17 @@ class PromptEditor(QWidget):
         self._update_preview()
         self._commit_undo_snapshot()
 
-    def refresh_tile_states_from_document(self) -> None:
-        """外部で変更したON/OFF状態だけを、UI再構築なしで反映する。"""
+    def refresh_tile_states_from_document(self, *, record_undo: bool = True) -> None:
+        """外部で変更したON/OFF状態だけを、UI再構築なしで反映する。
+
+        生成中の一時的な選択表示など、ユーザー編集ではない状態遷移は
+        ``record_undo=False`` で UNDO 履歴へ積まずに反映できる。
+        """
         for bw in self.all_block_widgets():
             bw.refresh_tile_states()
         self._update_preview()
-        self._commit_undo_snapshot()
+        if record_undo:
+            self._commit_undo_snapshot()
 
     def undo(self) -> bool:
         """直前のスナップショットを復元する。成功すれば True。"""

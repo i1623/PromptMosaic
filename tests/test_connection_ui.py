@@ -11,9 +11,10 @@ try:
     from PySide6.QtGui import QDropEvent
     from PySide6.QtWidgets import QApplication, QWidget
 
-    from core.prompt_builder import Block, GroupTile, NaturalTextTile, TagTile
+    from core.prompt_builder import Block, GroupTile, NaturalTextTile, PromptDocument, TagTile
     from ui.block_widget import BlockWidget
     from ui.connection_drag import ConnectionHandle
+    from ui.main_window import MainWindow
     from ui.tile_widget import TILE_MIME
 
     HAS_QT = True
@@ -32,6 +33,56 @@ class ConnectionUiTests(unittest.TestCase):
 
     def _tag(self, value: str, *, category: str = "") -> TagTile:
         return TagTile(tag_name=value, tag_local=value, category=category)
+
+    def test_generation_restores_initial_selection_candidate_states(self) -> None:
+        random_group = GroupTile(
+            name="Colors",
+            mode="random",
+            tiles=[self._text("red", enabled=True), self._text("blue", enabled=False)],
+        )
+        sequential_group = GroupTile(
+            name="Age",
+            mode="sequential",
+            tiles=[self._text("new", enabled=False), self._text("worn", enabled=True)],
+        )
+        sequential_group._seq_idx = 1
+        connection = GroupTile(
+            name="Connected",
+            group_type="connection",
+            tiles=[random_group, sequential_group],
+        )
+        doc = PromptDocument()
+        doc.positive.middle.tiles.append(connection)
+
+        class _EditorStub:
+            def __init__(self, document):
+                self.document = document
+                self.refresh_record_undo: list[bool] = []
+
+            def refresh_tile_states_from_document(self, *, record_undo=True):
+                self.refresh_record_undo.append(bool(record_undo))
+
+        class _WindowStub:
+            pass
+
+        window = _WindowStub()
+        window._editor = _EditorStub(doc)
+        window._generation_selection_snapshot = None
+
+        MainWindow._apply_selection_to_live_doc(
+            window,
+            {id(random_group): [1], id(sequential_group): [0]},
+        )
+        self.assertEqual([tile.enabled for tile in random_group.tiles], [False, True])
+        self.assertEqual([tile.enabled for tile in sequential_group.tiles], [True, False])
+        self.assertEqual(window._editor.refresh_record_undo, [False])
+
+        MainWindow._restore_generation_selection_state(window)
+        self.assertEqual([tile.enabled for tile in random_group.tiles], [True, False])
+        self.assertEqual([tile.enabled for tile in sequential_group.tiles], [False, True])
+        self.assertEqual(sequential_group._seq_idx, 1)
+        self.assertIsNone(window._generation_selection_snapshot)
+        self.assertEqual(window._editor.refresh_record_undo, [False, False])
 
     def test_connection_handle_styles_parse_without_qt_warnings(self) -> None:
         messages: list[str] = []
