@@ -4,7 +4,9 @@
 
 [Japanese](README.md) | [English](README_EN.md)
 
-## Latest Update: v1.6.1
+## Latest Update: v1.6.2
+
+- Random and Sequential candidate tiles now return to their pre-generation ON/OFF states when a generation task ends. Tiles intentionally OFF at the start remain OFF, while the `✓✓` all-candidates-on action remains available as before.
 
 - Template fetching now accepts only complete standard txt2img workflows containing all routes PromptMosaic needs, including model, LoRA, positive/negative conditioning, CFG, seed and image output.
 - When fetching fails, the dialog explains what to enable or disable in Invoke and shows the technical validation details in the same prompt area.
@@ -72,7 +74,7 @@ It is intended to run next to Invoke: keep Invoke open beside it, then use Promp
 - **11 languages** - Japanese, English, Chinese (Simplified / Traditional), Korean, German, French, Spanish, Italian, Portuguese (Brazil), and Russian.
 - **Simple data backup** - back up PromptMosaic by copying the entire `data` folder.
 
-> **Version:** 1.6.1
+> **Version:** 1.6.2
 > **Target Invoke:** 6.13 or later
 > **Supported OS:** Windows 11 (PySide6 / Python 3.11 recommended)
 

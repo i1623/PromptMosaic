@@ -5,7 +5,7 @@
 This document is a feature-by-feature reference for PromptMosaic.
 If you are using PromptMosaic for the first time, read the [Tutorial](TUTORIAL_EN.md) first.
 
-> Target version: **1.6.1** / Target Invoke: **6.13 or later**
+> Target version: **1.6.2** / Target Invoke: **6.13 or later**
 
 ---
 
@@ -139,6 +139,7 @@ A connection group joins its words, sentences, and ordinary groups from left to 
 - Click a connected element's `🔗` to detach it or split the connection before/after it.
 - The connection group's whole-group ON/OFF switch only controls whether the completed fragment appears in the prompt. Its contents remain editable while OFF.
 - The connection-group `✓✓` action recursively finds every Random and Sequential group below it and turns all candidate tiles back on.
+- Candidate tiles temporarily selected during generation automatically return to their pre-generation ON/OFF states when the task ends. Candidates intentionally OFF at the start return to OFF, separately from the explicit `✓✓` all-candidates-on action.
 - Only the inside of a connection group scrolls horizontally. Collapsed child groups become equal-width chips that keep their mode icon and the beginning of their title.
 - `⧉` duplicates a group immediately into the center pane. A duplicated connection group starts with whole-group output OFF.
 
